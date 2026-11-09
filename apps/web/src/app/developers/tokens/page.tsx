@@ -1,0 +1,313 @@
+'use client';
+
+import { useState } from 'react';
+import { Copy, KeyRound, Plus, ShieldAlert, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
+
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Spinner } from '@/components/ui/spinner';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { EmptyState } from '@/components/empty-state';
+import { ErrorAlert } from '@/components/error-alert';
+import { PageHeader } from '@/components/page-header';
+import { StatusBadge } from '@/components/status-badge';
+import { timeAgo, useAsync } from '@/components/use-async';
+import { del, get, post, type ProjectSummary, type TokenRecord } from '@/lib/api';
+
+const SCOPES = [
+  { scope: 'project.read', hint: '读取项目与语言配置' },
+  { scope: 'repository.scan', hint: '上传本地扫描结果' },
+  { scope: 'sync.preview', hint: '创建三方比较预览' },
+  { scope: 'sync.push', hint: '把本地变更推送到平台' },
+  { scope: 'translation.read', hint: '读取译文' },
+  { scope: 'translation.pull', hint: '拉取已审核译文' },
+  { scope: 'translation.apply', hint: '把平台译文写回本地文件（高危）' },
+  { scope: 'translation.write', hint: '修改译文草稿' },
+  { scope: 'translation.review', hint: '提交审核决定' },
+  { scope: 'qa.execute', hint: '运行 QA 规则' },
+  { scope: 'glossary.read', hint: '读取术语库' },
+  { scope: 'release.publish', hint: '发布（需单独授权）' },
+];
+
+const DEFAULT_SCOPES = [
+  'project.read',
+  'repository.scan',
+  'sync.preview',
+  'sync.push',
+  'translation.read',
+  'translation.pull',
+  'qa.execute',
+];
+
+export default function TokensPage() {
+  const { data: projects } = useAsync(() => get<ProjectSummary[]>('/projects'), []);
+  const { data: tokens, error, loading, reload } = useAsync(() => get<TokenRecord[]>('/mcp-tokens'), []);
+
+  const [name, setName] = useState('my-laptop');
+  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [scopes, setScopes] = useState<string[]>(DEFAULT_SCOPES);
+  const [expiresInDays, setExpiresInDays] = useState(30);
+  const [issued, setIssued] = useState<{ token: string; tokenPrefix: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<unknown>(null);
+
+  async function create() {
+    setBusy(true);
+    setFormError(null);
+    try {
+      const result = await post<{ token: string; tokenPrefix: string }>('/mcp-tokens', {
+        name,
+        scopes,
+        projectIds: projectIds.length ? projectIds : (projects?.map((project) => project.id) ?? []),
+        expiresInDays,
+      });
+      setIssued(result);
+      toast.success('Token 已签发，明文只显示这一次');
+      await reload();
+    } catch (err) {
+      setFormError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="API / MCP Token"
+        description="Token 绑定用户、组织与项目范围；sync.push 与 translation.apply 是两个独立授权"
+      />
+
+      <ErrorAlert error={error} />
+      <ErrorAlert error={formError} onDismiss={() => setFormError(null)} />
+
+      {issued ? (
+        <Card className="border-warning/50 mb-4">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldAlert className="size-4" />
+              Token 只显示一次
+            </CardTitle>
+            <CardDescription>关闭后无法再次查看，请立即存入环境变量或密钥管理器</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <code className="bg-background flex-1 overflow-x-auto rounded-md border p-2 font-mono text-xs">{issued.token}</code>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(issued.token);
+                  toast.success('已复制');
+                }}
+                aria-label="复制 Token"
+              >
+                <Copy />
+              </Button>
+            </div>
+            <p className="text-muted-foreground text-xs">
+              在仓库里使用：<code className="font-mono">export LOCALEHUB_TOKEN=&quot;{issued.token.slice(0, 16)}…&quot;</code>
+              。不要提交到 Git，也不要写进 <code className="font-mono">.localehub/config.yaml</code>。
+            </p>
+            <Button variant="ghost" size="sm" onClick={() => setIssued(null)}>
+              我已保存，关闭
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <KeyRound className="size-4" />
+              签发新 Token
+            </CardTitle>
+            <CardDescription>只有交互式登录会话可以签发 Token，MCP Token 不能签发新 Token</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <FieldGroup className="grid gap-4 sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="token-name">名称</FieldLabel>
+                <Input id="token-name" value={name} onChange={(event) => setName(event.target.value)} />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="expires">有效期（天）</FieldLabel>
+                <Input
+                  id="expires"
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={expiresInDays}
+                  onChange={(event) => setExpiresInDays(Number(event.target.value))}
+                />
+              </Field>
+            </FieldGroup>
+
+            <FieldSet>
+              <FieldLegend variant="label">项目范围</FieldLegend>
+              <FieldDescription>不选表示该 Token 覆盖你已可访问的全部项目</FieldDescription>
+              <FieldGroup className="gap-3">
+                {projects?.map((project) => (
+                  <Field key={project.id} orientation="horizontal">
+                    <Checkbox
+                      id={`project-${project.id}`}
+                      checked={projectIds.includes(project.id)}
+                      onCheckedChange={(checked) =>
+                        setProjectIds(checked ? [...projectIds, project.id] : projectIds.filter((id) => id !== project.id))
+                      }
+                    />
+                    <FieldLabel htmlFor={`project-${project.id}`} className="font-normal">
+                      {project.name}
+                    </FieldLabel>
+                  </Field>
+                ))}
+              </FieldGroup>
+            </FieldSet>
+
+            <Separator />
+
+            <FieldSet>
+              <FieldLegend variant="label">Scopes</FieldLegend>
+              <FieldDescription>
+                写回本地文件需要 <span className="font-mono text-xs">translation.apply</span>；发布需要{' '}
+                <span className="font-mono text-xs">release.publish</span>，两者都不会被{' '}
+                <span className="font-mono text-xs">sync.push</span> 隐式授予
+              </FieldDescription>
+              <ScrollArea className="mt-2 h-56 rounded-md border p-3">
+                <FieldGroup className="gap-3">
+                  {SCOPES.map((item) => (
+                    <Field key={item.scope} orientation="horizontal">
+                      <Checkbox
+                        id={`scope-${item.scope}`}
+                        checked={scopes.includes(item.scope)}
+                        onCheckedChange={(checked) =>
+                          setScopes(checked ? [...scopes, item.scope] : scopes.filter((scope) => scope !== item.scope))
+                        }
+                      />
+                      <FieldLabel htmlFor={`scope-${item.scope}`} className="flex-col items-start gap-0 font-normal">
+                        <span className="font-mono text-xs">{item.scope}</span>
+                        <span className="text-muted-foreground text-xs">{item.hint}</span>
+                      </FieldLabel>
+                    </Field>
+                  ))}
+                </FieldGroup>
+              </ScrollArea>
+            </FieldSet>
+
+            <div className="flex items-center gap-2">
+              <Button onClick={create} disabled={busy || !scopes.length}>
+                {busy ? <Spinner data-icon="inline-start" /> : <Plus data-icon="inline-start" />}
+                签发
+              </Button>
+            </div>
+
+            <p className="text-muted-foreground text-xs">
+              写回本地文件需要 <span className="font-mono">translation.apply</span>；发布需要{' '}
+              <span className="font-mono">release.publish</span>，两者都不会被 <span className="font-mono">sync.push</span>{' '}
+              隐式授予。
+            </p>
+          </CardContent>
+        </Card>
+
+        <div className="flex min-w-0 flex-col gap-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">已签发 Token</CardTitle>
+              <CardDescription>数据库只保存 SHA-256 哈希；撤销立即生效</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <Skeleton className="h-32" />
+              ) : tokens?.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>名称</TableHead>
+                      <TableHead>前缀</TableHead>
+                      <TableHead>Scopes</TableHead>
+                      <TableHead>项目</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead className="text-right">最近使用</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {tokens.map((token) => (
+                      <TableRow key={token.id}>
+                        <TableCell className="font-medium">{token.name}</TableCell>
+                        <TableCell className="font-mono text-xs">{token.tokenPrefix}…</TableCell>
+                        <TableCell>
+                          <div className="flex max-w-56 flex-wrap gap-1">
+                            {token.scopes.map((scope) => (
+                              <Badge key={scope} variant="muted" className="font-mono text-[10px]">
+                                {scope}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs tabular-nums">{token.projectIds.length} 个</TableCell>
+                        <TableCell>
+                          <StatusBadge status={token.revokedAt ? 'REJECTED' : 'ACTIVE'} />
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-right text-xs">{timeAgo(token.lastUsedAt)}</TableCell>
+                        <TableCell className="text-right">
+                          {token.revokedAt ? null : (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label="撤销"
+                              onClick={async () => {
+                                await del(`/mcp-tokens/${token.id}`);
+                                toast.success('已撤销');
+                                await reload();
+                              }}
+                            >
+                              <Trash2 className="text-destructive" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <EmptyState icon={<KeyRound />} title="还没有 Token" description="签发一个 Token 让 Agent 能连接平台。" />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Local MCP 配置</CardTitle>
+              <CardDescription>放到仓库根目录的 .mcp.json</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <pre className="bg-muted max-w-full overflow-x-auto rounded-md p-3 font-mono text-xs">{`{
+ "mcpServers": {
+ "localehub-local": {
+ "command": "node",
+ "args": ["/path/to/localehub/apps/mcp-local/dist/bin.js", "--stdio", "--workspace", "."],
+ "env": {
+ "LOCALEHUB_API_URL": "http://localhost:3001/api/v1",
+ "LOCALEHUB_WORKSPACE": ".",
+ "LOCALEHUB_TOKEN": "\${LOCALEHUB_TOKEN}"
+ }
+ }
+ }
+}`}</pre>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </>
+  );
+}
