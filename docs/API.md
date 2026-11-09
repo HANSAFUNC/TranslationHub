@@ -41,8 +41,9 @@
 | Bearer Token | CLI、Local MCP、Remote MCP、集成脚本 | `Authorization: Bearer <lh_mcp_… \| lh_api_… \| 会话 JWT>`             | 无（凭据由调用方主动附加）                                                    |
 
 浏览器不再把任何凭据放进 `localStorage`。Cookie 凭据是浏览器自动附带的，因此写请求（POST / PUT /
-PATCH / DELETE）额外做两层校验：`Origin`/`Referer` 必须属于本部署（`CORS_ORIGINS` 或 API 自身
-origin），且双提交 Token 必须匹配。Bearer 请求只受 Origin 校验约束，没有 Origin 的调用方（curl、
+PATCH / DELETE）额外做两层校验：`Origin`/`Referer` 必须属于本部署（`CORS_ORIGINS`，未配置时默认
+`http://localhost:3000`；另加 API 自身 origin），且双提交 Token 必须匹配。允许列表与 CORS 中间件
+取自同一处配置，避免两者判断不一致。Bearer 请求只受 Origin 校验约束，没有 Origin 的调用方（curl、
 MCP 客户端）不受影响。
 
 生产环境（`NODE_ENV=production`）下纯 HTTP 携带凭据会被拒绝（`INSECURE_TRANSPORT`）；健康检查等

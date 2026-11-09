@@ -67,6 +67,24 @@ export function readSecret(name: string, options: { required?: boolean; fallback
   return '';
 }
 
+/**
+ * Origin the web app is served from when nothing is configured.
+ *
+ * Exported because more than one component has to agree on the allowlist: the CORS middleware and
+ * the CSRF guard. Reading `process.env` directly in the guard made it disagree with CORS on any
+ * instance where no env *file* exists (CI, a container started with real env vars) — the schema
+ * default applied to CORS, while the guard saw an empty string and rejected the web origin.
+ */
+export const DEFAULT_CORS_ORIGINS = 'http://localhost:3000';
+
+/** Effective CORS allowlist: configured value, or the default. Trailing slashes stripped. */
+export function corsOrigins(): string[] {
+  return (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS)
+    .split(',')
+    .map((entry) => entry.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_BASE_URL: z.string().default('http://localhost:3000'),
@@ -79,7 +97,7 @@ const envSchema = z.object({
   WEB_PORT: z.coerce.number().default(3000),
   WORKER_PORT: z.coerce.number().default(3002),
   MCP_REMOTE_PORT: z.coerce.number().default(3003),
-  CORS_ORIGINS: z.string().default('http://localhost:3000'),
+  CORS_ORIGINS: z.string().default(DEFAULT_CORS_ORIGINS),
   /** Express `trust proxy`: number of hops, or true/false. Off by default so X-Forwarded-For
    *  cannot be spoofed to dodge rate limits unless a reverse proxy really is in front. */
   TRUST_PROXY: z.string().default('false'),

@@ -291,6 +291,22 @@ describe('CsrfGuard', () => {
     expect(error?.code).toBe('CSRF_VERIFICATION_FAILED');
   });
 
+  it('trusts the default web origin when CORS_ORIGINS is not set at all', () => {
+    // Regression: the guard read `process.env` directly, so on an instance with no env *file*
+    // (CI, or a container given real env vars) it saw an empty allowlist while the CORS
+    // middleware used the schema default — and rejected the web app's own origin. It passed
+    // locally only because a localehub.env happened to exist.
+    delete process.env.CORS_ORIGINS;
+    const guard = new CsrfGuard();
+    const req = request({
+      method: 'POST',
+      headers: { origin: 'http://localhost:3000', 'x-csrf-token': 'token-value' },
+      cookies: { localehub_csrf: 'token-value' },
+      actor: userActor({ credentialSource: 'cookie' }),
+    });
+    expect(guard.canActivate(context(req, response()))).toBe(true);
+  });
+
   it('accepts the API’s own origin even when CORS_ORIGINS only lists the web app', () => {
     const guard = new CsrfGuard();
     const req = request({

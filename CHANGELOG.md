@@ -17,6 +17,11 @@
 
 ### 修复
 
+- **CSRF 守卫与 CORS 用了两个来源的允许列表**：守卫直接读 `process.env.CORS_ORIGINS`，而 CORS 中间件
+  用的是校验后的配置（含 schema 默认值）。在没有 env _文件_ 的实例上（CI、直接注入环境变量的容器）
+  守卫看到空字符串，于是把 Web 自己的 origin 判为非法，写请求一律 403。本地一直没暴露，因为
+  `localehub.env` 恰好存在。现在两者统一走 `corsOrigins()`，并补了不依赖 env 文件的回归测试。
+
 - **CI 变绿**：验收演示此前假定 API 已在运行——集成测试在 `afterAll` 里会杀掉它，所以 CI 里演示步骤
   必然以 `fetch failed` 失败。现在演示与集成测试共用一个 API 启动器（`apps/e2e-demo/src/api-harness.ts`），
   连不上就自己起、跑完只关自己起的那个。

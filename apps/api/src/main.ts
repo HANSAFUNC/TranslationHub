@@ -4,7 +4,7 @@ import { Logger } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
-import { loadEnv } from '@localehub/config';
+import { corsOrigins, loadEnv } from '@localehub/config';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
@@ -20,9 +20,8 @@ async function bootstrap(): Promise<void> {
   app.setGlobalPrefix('api/v1');
   app.use(cookieParser());
   app.enableCors({
-    origin: env.CORS_ORIGINS.split(',')
-      .map((origin) => origin.trim())
-      .filter(Boolean),
+    // Shares its source with the CSRF guard (`corsOrigins`), so the two cannot disagree.
+    origin: corsOrigins(),
     credentials: true,
   });
   app.enableShutdownHooks();

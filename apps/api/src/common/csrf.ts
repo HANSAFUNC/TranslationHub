@@ -1,6 +1,7 @@
 import { type CanActivate, type ExecutionContext, Injectable } from '@nestjs/common';
 import { timingSafeEqual } from 'node:crypto';
 import { ErrorCode, LocaleHubError } from '@localehub/contracts';
+import { corsOrigins } from '@localehub/config';
 import type { AuthenticatedRequest } from './auth';
 import { csrfCookieName, csrfHeaderName } from './auth';
 
@@ -84,11 +85,9 @@ function requestOrigin(request: AuthenticatedRequest): string | null {
  * working even when `CORS_ORIGINS` was only set for the web app during development.
  */
 function trustedOrigins(request: AuthenticatedRequest): Set<string> {
-  const origins = new Set<string>();
-  for (const entry of (process.env.CORS_ORIGINS ?? '').split(',')) {
-    const trimmed = entry.trim().replace(/\/+$/, '');
-    if (trimmed) origins.add(trimmed);
-  }
+  // Same source as the CORS middleware, so the two can never disagree about which origin is
+  // allowed to call this API.
+  const origins = new Set<string>(corsOrigins());
   const host = request.headers.host;
   if (host) {
     const forwarded = request.headers['x-forwarded-proto'];
