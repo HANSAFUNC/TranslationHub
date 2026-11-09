@@ -1,0 +1,29 @@
+{
+  "name": "@localehub/cli",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "localehub": "dist/bin.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "seed": "node dist/seed.js"
+  },
+  "dependencies": {
+    "@localehub/api-client": "workspace:*",
+    "@localehub/contracts": "workspace:*",
+    "@localehub/mcp-local": "workspace:*",
+    "@localehub/workspace": "workspace:*",
+    "yaml": "^2.6.1",
+    "@localehub/database": "workspace:*",
+    "@localehub/domain": "workspace:*",
+    "@localehub/config": "workspace:*",
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

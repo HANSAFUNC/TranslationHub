@@ -1,0 +1,24 @@
+{
+  "name": "@localehub/worker",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@localehub/config": "workspace:*",
+    "@localehub/contracts": "workspace:*",
+    "@localehub/database": "workspace:*",
+    "@localehub/domain": "workspace:*",
+    "bullmq": "^5.34.5",
+    "ioredis": "^5.4.2",
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
