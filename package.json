@@ -2,6 +2,7 @@
   "name": "localehub",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "LocaleHub - localization management platform with MCP-based bidirectional repository sync",
   "engines": {
     "node": ">=20"

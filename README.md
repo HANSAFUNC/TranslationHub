@@ -71,13 +71,13 @@ node apps/e2e-demo/dist/run-demo.js
 
 脚本会自动创建一份 `demo-app` 的临时副本并依次验证：
 
-| 场景 | 验证内容 |
-|---|---|
-| A | 扫描 → 预览 → 推送；重复推送幂等，不产生重复版本 |
-| B | 平台修正日语译文并审核 → Local MCP 拉取 → dry-run diff → 确认写回 → 校验 JSON/Key/占位符/Git diff |
-| C | 再次同步结果为 `unchanged`，不产生新版本 |
-| D | 平台草稿默认不进入 pull/apply 列表；显式 `include_drafts` 才可见并附带风险提示 |
-| E | 源文变更后依赖旧 Source Version 的目标译文自动标记 `STALE`，历史保留 |
+| 场景 | 验证内容                                                                                          |
+| ---- | ------------------------------------------------------------------------------------------------- |
+| A    | 扫描 → 预览 → 推送；重复推送幂等，不产生重复版本                                                  |
+| B    | 平台修正日语译文并审核 → Local MCP 拉取 → dry-run diff → 确认写回 → 校验 JSON/Key/占位符/Git diff |
+| C    | 再次同步结果为 `unchanged`，不产生新版本                                                          |
+| D    | 平台草稿默认不进入 pull/apply 列表；显式 `include_drafts` 才可见并附带风险提示                    |
+| E    | 源文变更后依赖旧 Source Version 的目标译文自动标记 `STALE`，历史保留                              |
 
 ## 接入真实仓库（Local MCP）
 
@@ -178,17 +178,17 @@ docker compose run --rm api pnpm prisma migrate deploy
 
 ## 文档
 
-| 文档 | 内容 |
-|---|---|
-| [docs/PRD.md](docs/PRD.md) | 产品需求、角色、验收场景 |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构、模块边界、双 MCP 设计 |
-| [docs/DATABASE.md](docs/DATABASE.md) | ER 关系、RLS、迁移说明 |
-| [docs/API.md](docs/API.md) | REST API、错误码、幂等与并发 |
-| [docs/MCP.md](docs/MCP.md) | Local / Remote MCP 工具与配置 |
-| [docs/SYNC.md](docs/SYNC.md) | 三方同步、基线、冲突算法与回写安全规则 |
-| [docs/SKILLS.md](docs/SKILLS.md) | Skill 安装、权限与执行边界 |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | 部署、备份、可观测性 |
-| [docs/STATUS.md](docs/STATUS.md) | **交付现状：已完成 / 未完成 / 已知风险** |
+| 文档                                         | 内容                                     |
+| -------------------------------------------- | ---------------------------------------- |
+| [docs/PRD.md](docs/PRD.md)                   | 产品需求、角色、验收场景                 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构、模块边界、双 MCP 设计              |
+| [docs/DATABASE.md](docs/DATABASE.md)         | ER 关系、RLS、迁移说明                   |
+| [docs/API.md](docs/API.md)                   | REST API、错误码、幂等与并发             |
+| [docs/MCP.md](docs/MCP.md)                   | Local / Remote MCP 工具与配置            |
+| [docs/SYNC.md](docs/SYNC.md)                 | 三方同步、基线、冲突算法与回写安全规则   |
+| [docs/SKILLS.md](docs/SKILLS.md)             | Skill 安装、权限与执行边界               |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)     | 部署、备份、可观测性                     |
+| [docs/STATUS.md](docs/STATUS.md)             | **交付现状：已完成 / 未完成 / 已知风险** |
 
 ## 安全基线
 
@@ -199,3 +199,7 @@ docker compose run --rm api pnpm prisma migrate deploy
 - 写文件前校验旧值未被改动，先备份、临时文件 + fsync + 原子 rename，写完重新解析；失败自动回滚。
 - 平台译文默认只拉取 `APPROVED`；AI 结果永远是草稿，不能绕过人工审核。
 - 上传的 Skill 脚本不在 API/Worker 进程内执行（见 docs/SKILLS.md 的执行边界说明）。
+
+## 许可证
+
+[MIT](LICENSE) © 2026 HANSAFUNC
