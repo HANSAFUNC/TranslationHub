@@ -66,10 +66,13 @@ jobs:
       - run: pnpm -r typecheck
       - run: pnpm lint
       - run: pnpm test
-      - name: Integration tests (boots the API itself)
-        run: pnpm test:integration
+      # Runs before the integration suite: the demo bootstraps its account through the public
+      # registration endpoint, which closes as soon as the instance has any user, and the
+      # integration suite creates users. Both boot their own API (see api-harness.ts).
       - name: Acceptance demo (scenario A-E)
         run: node apps/e2e-demo/dist/run-demo.js
+      - name: Integration tests (boots the API itself)
+        run: pnpm test:integration
       - name: Docker builds
         run: |
           docker build -f docker/api.Dockerfile -t localehub-api:ci .

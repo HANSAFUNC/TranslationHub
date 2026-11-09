@@ -31,6 +31,8 @@ export interface EnsureApiOptions {
   timeoutMs?: number;
   /** Forward the child's output to this process instead of buffering it. */
   inheritStdio?: boolean;
+  /** Environment for the child; defaults to this process's. */
+  env?: NodeJS.ProcessEnv;
 }
 
 export async function apiReachable(baseUrl: string, timeoutMs = 2_000): Promise<boolean> {
@@ -69,6 +71,7 @@ export async function ensureApi(baseUrl: string, options: EnsureApiOptions): Pro
 
   const child: ChildProcess = spawn('node', [entry], {
     cwd: options.root,
+    env: options.env ?? process.env,
     stdio: options.inheritStdio ? 'inherit' : ['ignore', 'pipe', 'pipe'],
     detached: false,
   });

@@ -230,6 +230,25 @@ async function main(): Promise<void> {
   const draftPull = await local.pullPlatformUpdates({ locales: ['ja-JP'] });
   const draftChange = (draftPull.changes as { key: string }[]).find((change) => change.key === 'checkout.cart_empty');
   check('draft is excluded from the default pull', !draftChange);
+
+  // The platform gates `include_drafts` behind an organization policy that starts off, so the
+  // flag alone is not enough to get unapproved text into a repository.
+  const orgBefore = await admin.call<{ allowDraftApply: boolean }>('GET', '/organization');
+  check('organization policy starts with draft apply disabled', orgBefore.allowDraftApply === false);
+  try {
+    await local.pullPlatformUpdates({ locales: ['ja-JP'], include_drafts: true });
+    check('include_drafts is refused while the policy is off', false, 'the platform allowed it');
+  } catch (error) {
+    check(
+      'include_drafts is refused while the policy is off',
+      (error as { code?: string }).code === 'POLICY_VIOLATION',
+      (error as { code?: string }).code ?? String(error),
+    );
+  }
+
+  // Enable it for this organization so the rest of the scenario can show the explicit path.
+  await admin.call('PATCH', '/organization/settings', { allowDraftApply: true });
+
   const draftPullExplicit = await local.pullPlatformUpdates({ locales: ['ja-JP'], include_drafts: true });
   const draftExplicit = (draftPullExplicit.changes as { key: string; reviewStatus: string }[]).find(
     (change) => change.key === 'checkout.cart_empty',
@@ -248,6 +267,10 @@ async function main(): Promise<void> {
     Boolean(riskyDraft) && typeof draftApplyExplicit.riskWarning === 'string',
     String(draftApplyExplicit.riskWarning ?? 'no warning'),
   );
+
+  // Leave the organization as the demo found it, so a later run starts from the safe default.
+  await admin.call('PATCH', '/organization/settings', { allowDraftApply: false });
+  check('organization policy restored to disabled', true, 'demo leaves no policy change behind');
 
   /* ---------------------------------------------------------------- scenario E */
 
@@ -314,8 +337,22 @@ async function bootstrapSession(apiUrl: string, email: string, password: string)
   try {
     login = await fetchJson(apiUrl, '/auth/login', 'POST', { email, password });
   } catch {
-    await register().catch(() => undefined);
-    login = await fetchJson(apiUrl, '/auth/login', 'POST', { email, password });
+    // Registration only works while the instance has no users at all, so on a used instance this
+    // is expected to fail. Say so plainly rather than surfacing "Invalid email or password",
+    // which reads like a credential typo.
+    const registration = await register()
+      .then(() => null)
+      .catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+    try {
+      login = await fetchJson(apiUrl, '/auth/login', 'POST', { email, password });
+    } catch {
+      throw new Error(
+        `Cannot sign in as ${email}. Registration on this instance is closed, so the demo cannot ` +
+          `create the account it needs${registration ? ` (${registration})` : ''}. ` +
+          `Point DEMO_EMAIL / DEMO_PASSWORD at an existing member of the platform, or run the demo ` +
+          `against a fresh instance (or after \`pnpm db:seed\`, which creates demo@localehub.dev).`,
+      );
+    }
   }
 
   const token = String(login.token);

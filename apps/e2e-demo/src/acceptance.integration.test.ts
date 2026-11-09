@@ -218,6 +218,13 @@ describe('acceptance: local repository ↔ platform sync', () => {
     const pull = await local.pullPlatformUpdates({ locales: ['ja-JP'] });
     expect((pull.changes as { key: string }[]).some((change) => change.key === 'checkout.cart_empty')).toBe(false);
 
+    // Drafts require an explicit include_drafts, which the platform now gates behind an
+    // organization policy that starts off. Enable it for this organization only.
+    const organization = await admin.call<{ allowDraftApply: boolean }>('GET', '/organization');
+    if (!organization.allowDraftApply) {
+      await admin.call('PATCH', '/organization/settings', { allowDraftApply: true });
+    }
+
     const explicit = await local.pullPlatformUpdates({ locales: ['ja-JP'], include_drafts: true });
     const draft = (explicit.changes as { key: string; reviewStatus: string }[]).find(
       (change) => change.key === 'checkout.cart_empty',
