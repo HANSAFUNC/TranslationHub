@@ -1,0 +1,19 @@
+{
+  "name": "@localehub/workspace",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@localehub/contracts": "workspace:*",
+    "yaml": "^2.6.1",
+    "@localehub/format-adapters": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

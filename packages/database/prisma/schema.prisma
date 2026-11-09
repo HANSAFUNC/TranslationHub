@@ -1,0 +1,979 @@
+// LocaleHub database schema.
+//
+// Multi tenancy: every tenant scoped table carries `organization_id` and is covered by a
+// PostgreSQL RLS policy (see prisma/migrations/*/migration.sql and docs/DATABASE.md).
+// The application role `localehub_app` is not the table owner, so RLS is enforced.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/* ------------------------------------------------------------------ enums */
+
+enum OrgRole {
+  ORG_OWNER
+  ORG_ADMIN
+  PROJECT_MANAGER
+  DEVELOPER
+  PRODUCT_MANAGER
+  TRANSLATOR
+  REVIEWER
+  READONLY
+}
+
+enum ProjectRole {
+  PROJECT_MANAGER
+  DEVELOPER
+  PRODUCT_MANAGER
+  TRANSLATOR
+  REVIEWER
+  READONLY
+}
+
+enum PlatformKind {
+  web
+  ios
+  android
+  universal
+}
+
+enum ReviewStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  STALE
+}
+
+enum LocaleStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum RepoProvider {
+  github
+  gitlab
+  bitbucket
+  azure_devops
+  local
+}
+
+enum RepositoryStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum SyncDirection {
+  push
+  pull
+  bidirectional
+}
+
+enum SyncSessionStatus {
+  PENDING
+  RUNNING
+  PARTIAL
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum SyncItemAction {
+  SKIP
+  PUSH_LOCAL
+  PUSH_NEW
+  PULL_REMOTE
+  PULL_NEW
+  CONVERGED
+  CONFLICT
+  ARCHIVE_CANDIDATE
+  REMOTE_ARCHIVE_CANDIDATE
+  ARCHIVE_CONVERGED
+}
+
+enum SyncItemStatus {
+  PENDING
+  APPLIED
+  SKIPPED
+  FAILED
+  CONFLICT
+}
+
+enum ConflictStatus {
+  OPEN
+  RESOLVED
+  DEFERRED
+}
+
+enum ConflictResolution {
+  KEEP_LOCAL
+  KEEP_REMOTE
+  MANUAL_MERGE
+  DEFER
+}
+
+enum ConflictReason {
+  LOCAL_AND_REMOTE_CHANGED
+  SOURCE_VERSION_CHANGED
+  FILE_MAPPING_CHANGED
+  LOCAL_DELETED_REMOTE_CHANGED
+}
+
+enum ProjectEventType {
+  KEY_CREATED
+  KEY_ARCHIVED
+  SOURCE_VERSION_CREATED
+  TRANSLATION_CREATED
+  TRANSLATION_UPDATED
+  TRANSLATION_SUBMITTED
+  TRANSLATION_APPROVED
+  TRANSLATION_REJECTED
+  TRANSLATION_STALE
+  SYNC_PUSHED
+  SYNC_APPLIED
+  CONFLICT_RESOLVED
+  RELEASE_PUBLISHED
+}
+
+enum ReviewDecision {
+  APPROVE
+  REJECT
+  REQUEST_CHANGES
+}
+
+enum QaSeverity {
+  ERROR
+  WARNING
+  INFO
+}
+
+enum QaRunStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum QaIssueStatus {
+  OPEN
+  RESOLVED
+  IGNORED
+}
+
+enum ReleaseStatus {
+  DRAFT
+  VALIDATED
+  PUBLISHED
+}
+
+enum McpTokenKind {
+  MCP
+  API
+}
+
+enum SkillKind {
+  PROMPT
+  SCRIPT
+}
+
+enum SkillStatus {
+  DRAFT
+  PUBLISHED
+  DISABLED
+}
+
+enum AiProviderKind {
+  anthropic
+  openai
+  azure_openai
+  ollama
+  custom
+}
+
+/* ------------------------------------------------------------- identity */
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique
+  name            String
+  passwordHash    String    @map("password_hash")
+  isPlatformAdmin Boolean   @default(false) @map("is_platform_admin")
+  lastLoginAt     DateTime? @map("last_login_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  memberships  Membership[]
+  projectRoles ProjectMember[]
+  mcpClients   McpClient[]
+
+  @@map("users")
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  memberships            Membership[]
+  projects               Project[]
+  mcpClients             McpClient[]
+  glossaryTerms          GlossaryTerm[]
+  aiProviders            AiProviderConfig[]
+  skills                 Skill[]
+  auditLogs              AuditLog[]
+  translationMemory      TranslationMemoryEntry[]
+
+  @@map("organizations")
+}
+
+model Membership {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  role           OrgRole
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+/* -------------------------------------------------------------- projects */
+
+model Project {
+  id              String       @id @default(uuid()) @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  name            String
+  slug            String
+  description     String?
+  sourceLocale    String       @map("source_locale")
+  defaultPlatform PlatformKind @default(web) @map("default_platform")
+  revision        Int          @default(0)
+  aiPolicy        Json?        @map("ai_policy")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  locales        Locale[]
+  platforms      ProjectPlatform[]
+  namespaces     Namespace[]
+  keys           TranslationKey[]
+  entries        TranslationEntry[]
+  members        ProjectMember[]
+  connections    RepositoryConnection[]
+  syncSessions   SyncSession[]
+  syncBaselines  SyncBaseline[]
+  syncScans      SyncScan[]
+  conflicts      SyncConflict[]
+  events         ProjectEvent[]
+  glossaryTerms  GlossaryTerm[]
+  qaRuns         QaRun[]
+  qaIssues       QaIssue[]
+  releases       Release[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@map("projects")
+}
+
+model ProjectMember {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  projectId      String      @map("project_id") @db.Uuid
+  userId         String      @map("user_id") @db.Uuid
+  role           ProjectRole
+  localeScope    String[]    @default([]) @map("locale_scope")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@map("project_members")
+}
+
+model Locale {
+  id        String       @id @default(uuid()) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  projectId String       @map("project_id") @db.Uuid
+  code      String
+  name      String
+  isSource  Boolean      @default(false) @map("is_source")
+  status    LocaleStatus @default(ACTIVE)
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  project Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  entries TranslationEntry[]
+
+  @@unique([projectId, code])
+  @@index([organizationId])
+  @@map("locales")
+}
+
+model ProjectPlatform {
+  id        String       @id @default(uuid()) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  projectId String       @map("project_id") @db.Uuid
+  platform  PlatformKind
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, platform])
+  @@map("project_platforms")
+}
+
+model Namespace {
+  id        String       @id @default(uuid()) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  projectId String       @map("project_id") @db.Uuid
+  name      String       @default("")
+  platform  PlatformKind @default(universal)
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  project Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  keys    TranslationKey[]
+
+  @@unique([projectId, platform, name])
+  @@map("namespaces")
+}
+
+/* ------------------------------------------------------- translation core */
+
+model TranslationKey {
+  id            String       @id @default(uuid()) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  projectId     String       @map("project_id") @db.Uuid
+  platform      PlatformKind @default(web)
+  namespaceId   String       @map("namespace_id") @db.Uuid
+  key           String
+  description   String?
+  context       Json?
+  archivedAt    DateTime?    @map("archived_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  project    Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  namespace  Namespace        @relation(fields: [namespaceId], references: [id], onDelete: Cascade)
+  sourceVersions SourceVersion[]
+  entries    TranslationEntry[]
+
+  @@unique([projectId, platform, namespaceId, key])
+  @@index([organizationId])
+  @@index([projectId, key])
+  @@map("translation_keys")
+}
+
+model SourceVersion {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  keyId          String   @map("key_id") @db.Uuid
+  version        Int
+  value          String
+  contentHash    String   @map("content_hash")
+  description    String?
+  authorId       String?  @map("author_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  key TranslationKey @relation(fields: [keyId], references: [id], onDelete: Cascade)
+
+  @@unique([keyId, version])
+  @@index([projectId, contentHash])
+  @@map("source_versions")
+}
+
+model TranslationEntry {
+  id                    String       @id @default(uuid()) @db.Uuid
+  organizationId        String       @map("organization_id") @db.Uuid
+  projectId             String       @map("project_id") @db.Uuid
+  keyId                 String       @map("key_id") @db.Uuid
+  localeId              String       @map("locale_id") @db.Uuid
+  localeCode            String       @map("locale_code")
+  value                 String       @default("")
+  contentHash           String       @map("content_hash")
+  status                ReviewStatus @default(DRAFT)
+  revision              Int          @default(1)
+  currentVersionId      String?      @map("current_version_id") @db.Uuid
+  basedOnSourceVersionId String?     @map("based_on_source_version_id") @db.Uuid
+  comment               String?
+  updatedById           String?      @map("updated_by_id") @db.Uuid
+  appliedToRepoAt       DateTime?    @map("applied_to_repo_at")
+  appliedToRepoCommit   String?      @map("applied_to_repo_commit")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+
+  key      TranslationKey @relation(fields: [keyId], references: [id], onDelete: Cascade)
+  project  Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  locale   Locale         @relation(fields: [localeId], references: [id], onDelete: Cascade)
+  versions TranslationVersion[]
+  reviewTasks ReviewTask[]
+  qaIssues QaIssue[]
+
+  @@unique([keyId, localeId])
+  @@index([projectId, status])
+  @@index([organizationId])
+  @@index([projectId, localeCode])
+  @@map("translation_entries")
+}
+
+model TranslationVersion {
+  id                     String       @id @default(uuid()) @db.Uuid
+  organizationId         String       @map("organization_id") @db.Uuid
+  projectId              String       @map("project_id") @db.Uuid
+  entryId                String       @map("entry_id") @db.Uuid
+  version                Int
+  value                  String
+  contentHash            String       @map("content_hash")
+  status                 ReviewStatus @default(DRAFT)
+  authorId               String?      @map("author_id") @db.Uuid
+  authorType             String       @default("user") @map("author_type")
+  basedOnSourceVersionId String?      @map("based_on_source_version_id") @db.Uuid
+  comment                String?
+  createdAt              DateTime     @default(now()) @map("created_at")
+
+  entry TranslationEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([entryId, version])
+  @@index([projectId, createdAt])
+  @@map("translation_versions")
+}
+
+model ReviewTask {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  projectId      String         @map("project_id") @db.Uuid
+  entryId        String         @map("entry_id") @db.Uuid
+  localeCode     String         @map("locale_code")
+  status         ReviewStatus   @default(PENDING_REVIEW)
+  assigneeId     String?        @map("assignee_id") @db.Uuid
+  submittedById  String?        @map("submitted_by_id") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at")
+  completedAt    DateTime?      @map("completed_at")
+
+  entry   TranslationEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  actions ReviewAction[]
+
+  @@index([projectId, status])
+  @@map("review_tasks")
+}
+
+model ReviewAction {
+  id         String         @id @default(uuid()) @db.Uuid
+  taskId     String         @map("task_id") @db.Uuid
+  actorId    String?        @map("actor_id") @db.Uuid
+  decision   ReviewDecision
+  comment    String?
+  entryVersion Int          @map("entry_version")
+  createdAt  DateTime       @default(now()) @map("created_at")
+
+  task ReviewTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("review_actions")
+}
+
+/* -------------------------------------------------------- glossary / TM */
+
+model GlossaryTerm {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  projectId      String?  @map("project_id") @db.Uuid
+  term           String
+  translations   Json
+  description    String?
+  caseSensitive  Boolean  @default(false) @map("case_sensitive")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project      Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, projectId])
+  @@map("glossary_terms")
+}
+
+model TranslationMemoryEntry {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  projectId      String?  @map("project_id") @db.Uuid
+  sourceLocale   String   @map("source_locale")
+  targetLocale   String   @map("target_locale")
+  sourceHash     String   @map("source_hash")
+  sourceText     String   @map("source_text")
+  targetText     String   @map("target_text")
+  usageCount     Int      @default(0) @map("usage_count")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, sourceLocale, targetLocale, sourceHash])
+  @@map("translation_memory_entries")
+}
+
+/* ------------------------------------------------------- repository sync */
+
+model RepositoryConnection {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  projectId      String           @map("project_id") @db.Uuid
+  name           String
+  provider       RepoProvider     @default(local)
+  repoUrl        String?          @map("repo_url")
+  defaultBranch  String           @default("main") @map("default_branch")
+  status         RepositoryStatus @default(ACTIVE)
+  lastCommit     String?          @map("last_commit")
+  lastBranch     String?          @map("last_branch")
+  lastSeenAt     DateTime?        @map("last_seen_at")
+  clientName     String?          @map("client_name")
+  clientVersion  String?          @map("client_version")
+  createdById    String?          @map("created_by_id") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  project     Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  mappings    RepositoryFileMapping[]
+  baselines   SyncBaseline[]
+  sessions    SyncSession[]
+  scans       SyncScan[]
+
+  @@unique([projectId, name])
+  @@index([organizationId])
+  @@map("repository_connections")
+}
+
+model RepositoryFileMapping {
+  id                       String       @id @default(uuid()) @db.Uuid
+  organizationId           String       @map("organization_id") @db.Uuid
+  connectionId             String       @map("connection_id") @db.Uuid
+  fileSetId                String       @map("file_set_id")
+  platform                 PlatformKind
+  locale                   String?
+  localeFromPath           Boolean      @default(false) @map("locale_from_path")
+  format                   String
+  source                   Boolean      @default(false)
+  paths                    String[]
+  keyMode                  String       @default("nested") @map("key_mode")
+  namespaceFromPath        Boolean      @default(false) @map("namespace_from_path")
+  preservePlatformMetadata Boolean      @default(true) @map("preserve_platform_metadata")
+  lastScannedAt            DateTime?    @map("last_scanned_at")
+  createdAt                DateTime     @default(now()) @map("created_at")
+
+  connection RepositoryConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, fileSetId])
+  @@map("repository_file_mappings")
+}
+
+model SyncScan {
+  id                     String   @id @default(uuid()) @db.Uuid
+  organizationId         String   @map("organization_id") @db.Uuid
+  projectId              String   @map("project_id") @db.Uuid
+  connectionId           String?  @map("connection_id") @db.Uuid
+  scanId                 String   @unique @map("scan_id")
+  clientName             String?  @map("client_name")
+  clientVersion          String?  @map("client_version")
+  gitBranch              String?  @map("git_branch")
+  gitCommit              String?  @map("git_commit")
+  fileCount              Int      @default(0) @map("file_count")
+  entryCount             Int      @default(0) @map("entry_count")
+  files                  Json     @default("[]")
+  entries                Json     @default("[]")
+  warnings               Json     @default("[]")
+  createdAt              DateTime @default(now()) @map("created_at")
+  expiresAt              DateTime @map("expires_at")
+
+  project    Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  connection RepositoryConnection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([projectId, createdAt])
+  @@map("sync_scans")
+}
+
+model SyncSession {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @map("organization_id") @db.Uuid
+  projectId       String            @map("project_id") @db.Uuid
+  connectionId    String?           @map("connection_id") @db.Uuid
+  direction       SyncDirection
+  status          SyncSessionStatus @default(PENDING)
+  baseRevision    Int?              @map("base_revision")
+  revisionAfter   Int?              @map("revision_after")
+  planHash        String?           @map("plan_hash")
+  summary         Json?
+  error           String?
+  clientName      String?           @map("client_name")
+  clientVersion   String?           @map("client_version")
+  gitBranch       String?           @map("git_branch")
+  gitCommit       String?           @map("git_commit")
+  createdById     String?           @map("created_by_id") @db.Uuid
+  createdAt       DateTime          @default(now()) @map("created_at")
+  completedAt     DateTime?         @map("completed_at")
+
+  project    Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  connection RepositoryConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  items      SyncItem[]
+  plans      SyncPlan[]
+  conflicts  SyncConflict[]
+  applyReports SyncApplyReport[]
+
+  @@index([organizationId])
+  @@index([projectId, createdAt])
+  @@map("sync_sessions")
+}
+
+model SyncItem {
+  id                   String         @id @default(uuid()) @db.Uuid
+  organizationId       String         @map("organization_id") @db.Uuid
+  sessionId            String         @map("session_id") @db.Uuid
+  action               SyncItemAction
+  status               SyncItemStatus @default(PENDING)
+  translationKey       String         @map("translation_key")
+  localeCode           String         @map("locale_code")
+  platform             PlatformKind
+  namespace            String         @default("")
+  localHash            String?        @map("local_hash")
+  remoteHash           String?        @map("remote_hash")
+  baseHash             String?        @map("base_hash")
+  entryId              String?        @map("entry_id") @db.Uuid
+  translationVersionId String?        @map("translation_version_id") @db.Uuid
+  errorCode            String?        @map("error_code")
+  errorMessage         String?        @map("error_message")
+  createdAt            DateTime       @default(now()) @map("created_at")
+
+  session SyncSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, platform, namespace, translationKey, localeCode])
+  @@index([organizationId])
+  @@map("sync_items")
+}
+
+model SyncBaseline {
+  id                   String       @id @default(uuid()) @db.Uuid
+  organizationId       String       @map("organization_id") @db.Uuid
+  projectId            String       @map("project_id") @db.Uuid
+  connectionId         String       @map("connection_id") @db.Uuid
+  platform             PlatformKind
+  namespace            String       @default("")
+  translationKey       String       @map("translation_key")
+  localeCode           String       @map("locale_code")
+  localFileId          String?      @map("local_file_id")
+  localFilePath        String?      @map("local_file_path")
+  localHash            String?      @map("local_hash")
+  remoteHash           String?      @map("remote_hash")
+  baseValue            String?      @map("base_value")
+  sourceVersionId      String?      @map("source_version_id") @db.Uuid
+  translationVersionId String?      @map("translation_version_id") @db.Uuid
+  remoteRevision       Int          @default(0) @map("remote_revision")
+  lastSyncedAt         DateTime     @default(now()) @map("last_synced_at")
+
+  project    Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  connection RepositoryConnection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, platform, namespace, translationKey, localeCode])
+  @@index([organizationId])
+  @@index([projectId])
+  @@map("sync_baselines")
+}
+
+model SyncPlan {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  projectId      String       @map("project_id") @db.Uuid
+  sessionId      String       @map("session_id") @db.Uuid
+  scanId         String       @map("scan_id")
+  direction      SyncDirection
+  baseRevision   Int          @map("base_revision")
+  planHash       String       @unique @map("plan_hash")
+  planJson       Json         @map("plan_json")
+  summary        Json
+  expiresAt      DateTime     @map("expires_at")
+  confirmedAt    DateTime?    @map("confirmed_at")
+  idempotencyKey String?      @map("idempotency_key")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  session SyncSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([projectId, createdAt])
+  @@map("sync_plans")
+}
+
+model SyncConflict {
+  id                   String             @id @default(uuid()) @db.Uuid
+  organizationId       String             @map("organization_id") @db.Uuid
+  projectId            String             @map("project_id") @db.Uuid
+  sessionId            String?            @map("session_id") @db.Uuid
+  platform             PlatformKind
+  namespace            String             @default("")
+  translationKey       String             @map("translation_key")
+  localeCode           String             @map("locale_code")
+  baseValue            String?            @map("base_value")
+  localValue           String?            @map("local_value")
+  remoteValue          String?            @map("remote_value")
+  baseHash             String?            @map("base_hash")
+  localHash            String?            @map("local_hash")
+  remoteHash           String?            @map("remote_hash")
+  reason               ConflictReason
+  filePath             String?            @map("file_path")
+  remoteVersionId      String?            @map("remote_version_id") @db.Uuid
+  status               ConflictStatus     @default(OPEN)
+  resolution           ConflictResolution?
+  resolvedValue        String?            @map("resolved_value")
+  resolvedById         String?            @map("resolved_by_id") @db.Uuid
+  resolvedAt           DateTime?          @map("resolved_at")
+  note                 String?
+  createdAt            DateTime           @default(now()) @map("created_at")
+
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  session SyncSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([projectId, status])
+  @@map("sync_conflicts")
+}
+
+model SyncApplyReport {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @map("organization_id") @db.Uuid
+  projectId      String            @map("project_id") @db.Uuid
+  sessionId      String            @map("session_id") @db.Uuid
+  applyPlanId    String            @map("apply_plan_id")
+  status         SyncSessionStatus
+  files          Json              @default("[]")
+  items          Json              @default("[]")
+  appliedCount   Int               @default(0) @map("applied_count")
+  failedCount    Int               @default(0) @map("failed_count")
+  gitCommit      String?           @map("git_commit")
+  gitDiffStat    String?           @map("git_diff_stat")
+  clientName     String?           @map("client_name")
+  clientVersion  String?           @map("client_version")
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  session SyncSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, applyPlanId])
+  @@index([organizationId])
+  @@map("sync_apply_reports")
+}
+
+model ProjectEvent {
+  id             String          @id @default(uuid()) @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  projectId      String          @map("project_id") @db.Uuid
+  eventType      ProjectEventType @map("event_type")
+  resourceType   String          @map("resource_type")
+  resourceId     String?         @map("resource_id")
+  revision       Int
+  payload        Json            @default("{}")
+  actorId        String?         @map("actor_id") @db.Uuid
+  actorType      String          @default("user") @map("actor_type")
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, revision])
+  @@index([organizationId])
+  @@map("project_events")
+}
+
+/* ------------------------------------------------------------ mcp / auth */
+
+model McpClient {
+  id                     String       @id @default(uuid()) @db.Uuid
+  organizationId         String       @map("organization_id") @db.Uuid
+  userId                 String       @map("user_id") @db.Uuid
+  kind                   McpTokenKind @default(MCP)
+  name                   String
+  tokenHash              String       @unique @map("token_hash")
+  tokenPrefix            String       @map("token_prefix")
+  scopes                 String[]     @default([])
+  projectIds             String[]     @default([]) @map("project_ids")
+  repositoryConnectionId String?      @map("repository_connection_id") @db.Uuid
+  expiresAt              DateTime?    @map("expires_at")
+  lastUsedAt             DateTime?    @map("last_used_at")
+  revokedAt              DateTime?    @map("revoked_at")
+  createdAt              DateTime     @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("mcp_clients")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  actorId        String?  @map("actor_id") @db.Uuid
+  actorType      String   @default("user") @map("actor_type")
+  action         String
+  resourceType   String   @map("resource_type")
+  resourceId     String?  @map("resource_id")
+  metadata       Json     @default("{}")
+  requestId      String?  @map("request_id")
+  projectId      String?  @map("project_id") @db.Uuid
+  repositoryConnectionId String? @map("repository_connection_id") @db.Uuid
+  syncSessionId  String?  @map("sync_session_id") @db.Uuid
+  mcpClientId    String?  @map("mcp_client_id") @db.Uuid
+  durationMs     Int?     @map("duration_ms")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}
+
+/* ------------------------------------------------------------- qa / ai */
+
+model QaRule {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  projectId      String?     @map("project_id") @db.Uuid
+  code           String
+  name           String
+  severity       QaSeverity  @default(WARNING)
+  enabled        Boolean     @default(true)
+  config         Json        @default("{}")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  @@unique([organizationId, projectId, code])
+  @@map("qa_rules")
+}
+
+model QaRun {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  projectId      String      @map("project_id") @db.Uuid
+  status         QaRunStatus @default(PENDING)
+  triggeredById  String?     @map("triggered_by_id") @db.Uuid
+  scope          Json        @default("{}")
+  issueCount     Int         @default(0) @map("issue_count")
+  startedAt      DateTime?   @map("started_at")
+  finishedAt     DateTime?   @map("finished_at")
+  error          String?
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  project Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  issues  QaIssue[]
+
+  @@index([projectId, createdAt])
+  @@map("qa_runs")
+}
+
+model QaIssue {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  projectId      String        @map("project_id") @db.Uuid
+  runId          String?       @map("run_id") @db.Uuid
+  entryId        String?       @map("entry_id") @db.Uuid
+  translationKey String        @map("translation_key")
+  localeCode     String        @map("locale_code")
+  ruleCode       String        @map("rule_code")
+  severity       QaSeverity
+  message        String
+  details        Json          @default("{}")
+  status         QaIssueStatus @default(OPEN)
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  project Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  run     QaRun?         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  entry   TranslationEntry? @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, status])
+  @@map("qa_issues")
+}
+
+model AiProviderConfig {
+  id              String         @id @default(uuid()) @db.Uuid
+  organizationId  String         @map("organization_id") @db.Uuid
+  name            String
+  kind            AiProviderKind
+  baseUrl         String?        @map("base_url")
+  model           String
+  apiKeyEncrypted String?        @map("api_key_encrypted")
+  isDefault       Boolean        @default(false) @map("is_default")
+  enabled         Boolean        @default(true)
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("ai_provider_configs")
+}
+
+/* -------------------------------------------------------------- skills */
+
+model Skill {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String?     @map("organization_id") @db.Uuid
+  slug           String
+  name           String
+  kind           SkillKind   @default(PROMPT)
+  description    String?
+  version        String      @default("1.0.0")
+  content        String
+  manifest       Json        @default("{}")
+  status         SkillStatus @default(PUBLISHED)
+  createdById    String?     @map("created_by_id") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, slug, version])
+  @@map("skills")
+}
+
+/* ------------------------------------------------------------ releases */
+
+model Release {
+  id               String        @id @default(uuid()) @db.Uuid
+  organizationId   String        @map("organization_id") @db.Uuid
+  projectId        String        @map("project_id") @db.Uuid
+  name             String
+  status           ReleaseStatus @default(DRAFT)
+  locales          String[]
+  keyCount         Int           @default(0) @map("key_count")
+  snapshotChecksum String?       @map("snapshot_checksum")
+  createdById      String?       @map("created_by_id") @db.Uuid
+  publishedAt      DateTime?     @map("published_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  snapshots ReleaseSnapshot[]
+
+  @@index([projectId, status])
+  @@map("releases")
+}
+
+model ReleaseSnapshot {
+  id                   String   @id @default(uuid()) @db.Uuid
+  organizationId       String   @map("organization_id") @db.Uuid
+  releaseId            String   @map("release_id") @db.Uuid
+  translationKey       String   @map("translation_key")
+  localeCode           String   @map("locale_code")
+  platform             PlatformKind
+  namespace            String   @default("")
+  value                String
+  sourceVersionId      String?  @map("source_version_id") @db.Uuid
+  translationVersionId String?  @map("translation_version_id") @db.Uuid
+  contentHash          String   @map("content_hash")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  release Release @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@index([releaseId])
+  @@map("release_snapshots")
+}
