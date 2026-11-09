@@ -65,6 +65,22 @@ qa / status / patch / mcp-config / release validate`。
 - 5 个内置 Skill（prompt 型）。
 - 文档：README、PRD、ARCHITECTURE、DATABASE、API、MCP、SYNC、SKILLS、DEPLOYMENT、本文件。
 
+### 1.9 CI 恢复绿色
+
+`main` 上的 GitHub Actions 从第一次推送起一直是红的，三个原因互相掩盖，且**都在本地不可见**：
+
+| #   | 现象                                             | 根因                                                                                                                                                        | 为什么本地看不到                                   |
+| --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| 1   | `Acceptance demo` 报 `fetch failed`              | 演示假定 API 已在运行；集成测试在 `afterAll` 会先把它杀掉                                                                                                   | 本地一直开着 dev API                               |
+| 2   | `Acceptance demo` 报 `Invalid email or password` | 集成测试先跑并创建了用户 → 注册关闭 → 演示无法自建账号                                                                                                      | 本地库里早就有 demo 用户                           |
+| 3   | 集成测试 `expected 403 to be 201`                | CSRF 守卫读 `process.env.CORS_ORIGINS`，CORS 中间件读校验后的配置（含 schema 默认值）。没有 env **文件**的实例上守卫看到空串，把 Web 自己的 origin 判为非法 | 本地恰好存在 `localehub.env`，启动时被载入进程环境 |
+
+第 3 条用「把 `localehub.env` 挪走 + 导出 CI 的环境变量」在本地复现，旧实现产出与 CI 完全相同的断言失败；
+第 1、2 条用「新建空数据库，按 CI 顺序跑演示与集成测试」验证。
+
+核对方式（无需 CI 日志权限）：`badge.svg` 与 `actions/workflows/ci.yml` 页面 HTML 均显示
+`completed successfully: Run 5 of CI`。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态                    | 说明                                                                                                                                                                                                                                                                         |
@@ -162,6 +178,7 @@ curl -o /dev/null -w %{http_code} /login 等     # 8 个页面均 200
 | ------------------------------------------------ | --------------------------------------- |
 | `pnpm -r typecheck`                              | 全部 17 个 workspace 项目通过           |
 | `pnpm lint`（`eslint . --max-warnings 0`）       | 0 error / 0 warning                     |
+| GitHub Actions `CI`（main）                      | **通过**（Run 5）                       |
 | Local / Remote MCP 真实客户端握手                | 通过（见附二）                          |
 | 端到端演示连续两次运行                           | 均通过（demo 自带项目清理，可重复执行） |
 | `pnpm test`                                      | 88 passed                               |
