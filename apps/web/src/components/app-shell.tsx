@@ -35,7 +35,7 @@ import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTheme } from '@/components/theme-provider';
-import { get, getToken, post, setToken, type Me } from '@/lib/api';
+import { get, post, type Me } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -125,8 +125,7 @@ function ThemeToggle() {
   );
 }
 
-function UserMenu({ me }: { me: Me | null }) {
-  const router = useRouter();
+function UserMenu({ me, onSignOut }: { me: Me | null; onSignOut: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -155,8 +154,7 @@ function UserMenu({ me }: { me: Me | null }) {
           variant="destructive"
           onClick={async () => {
             await post('/auth/logout').catch(() => undefined);
-            setToken(null);
-            router.replace('/login');
+            onSignOut();
           }}
         >
           <LogOut />
@@ -170,33 +168,45 @@ function UserMenu({ me }: { me: Me | null }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  // The session lives in an HttpOnly cookie, so the page cannot check for it directly. Asking
+  // `/auth/me` is the only way to know, and a 401 there is exactly the "signed out" signal.
   const [ready, setReady] = useState(false);
-  const [hasToken, setHasToken] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
   const [me, setMe] = useState<Me | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    setHasToken(Boolean(getToken()));
-    setReady(true);
-  }, []);
-
-  useEffect(() => {
-    if (ready && !getToken() && pathname !== '/login') router.replace('/login');
-  }, [ready, pathname, router]);
-
-  useEffect(() => {
-    if (ready && hasToken)
-      void get<Me>('/auth/me')
-        .then(setMe)
-        .catch(() => undefined);
-  }, [ready, hasToken]);
+    if (pathname === '/login') {
+      setReady(true);
+      return;
+    }
+    let cancelled = false;
+    setReady(false);
+    void get<Me>('/auth/me')
+      .then((profile) => {
+        if (cancelled) return;
+        setMe(profile);
+        setAuthenticated(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAuthenticated(false);
+        router.replace('/login');
+      })
+      .finally(() => {
+        if (!cancelled) setReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, router]);
 
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
 
   if (pathname === '/login') return <>{children}</>;
-  if (!ready || !hasToken) return null;
+  if (!ready || !authenticated) return null;
 
   return (
     <div className="bg-background min-h-svh lg:grid lg:grid-cols-[16rem_1fr]">
@@ -241,7 +251,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <div className="flex-1" />
           <ThemeToggle />
-          <UserMenu me={me} />
+          <UserMenu me={me} onSignOut={() => router.replace('/login')} />
         </header>
 
         <main className="min-w-0 flex-1 p-4 sm:p-6">{children}</main>

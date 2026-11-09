@@ -11,7 +11,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { ErrorAlert } from '@/components/error-alert';
-import { post, setToken } from '@/lib/api';
+import { post } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -28,11 +28,11 @@ export default function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      const result =
-        mode === 'login'
-          ? await post<{ token: string }>('/auth/login', { email, password })
-          : await post<{ token: string }>('/auth/register', { email, password, name, organizationName });
-      setToken(result.token);
+      // Both endpoints set the HttpOnly session cookie (and the CSRF cookie) themselves; there is
+      // no token for the page to keep.
+      await (mode === 'login'
+        ? post('/auth/login', { email, password })
+        : post('/auth/register', { email, password, name, organizationName }));
       toast.success(mode === 'login' ? '已登录' : '管理员账号已创建');
       router.replace('/');
     } catch (err) {

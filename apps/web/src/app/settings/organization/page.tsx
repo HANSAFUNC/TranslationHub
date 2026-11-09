@@ -1,8 +1,13 @@
 'use client';
 
-import { Building2, ShieldCheck, UserRound } from 'lucide-react';
+import { useState } from 'react';
+import { Building2, ShieldCheck, TriangleAlert, UserRound } from 'lucide-react';
+import { toast } from 'sonner';
 
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Field, FieldContent, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -10,7 +15,7 @@ import { ErrorAlert } from '@/components/error-alert';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { useAsync } from '@/components/use-async';
-import { get, type Me } from '@/lib/api';
+import { get, patch, type Me, type OrganizationSettings } from '@/lib/api';
 
 const ROLE_MATRIX: [string, string][] = [
   ['ORG_OWNER / ORG_ADMIN', '组织成员、项目、AI Provider、MCP 客户端与安全策略'],
@@ -24,6 +29,28 @@ const ROLE_MATRIX: [string, string][] = [
 
 export default function OrganizationSettingsPage() {
   const { data, error, loading } = useAsync(() => get<Me>('/auth/me'), []);
+  const {
+    data: settings,
+    error: settingsError,
+    loading: settingsLoading,
+    reload,
+  } = useAsync(() => get<OrganizationSettings>('/organization'), []);
+  const [saving, setSaving] = useState(false);
+
+  const canManage = data?.role === 'ORG_OWNER' || data?.role === 'ORG_ADMIN' || Boolean(data?.isPlatformAdmin);
+
+  async function setDraftPolicy(allowDraftApply: boolean) {
+    setSaving(true);
+    try {
+      await patch('/organization/settings', { allowDraftApply });
+      toast.success(allowDraftApply ? '已允许回写未审核草稿' : '已禁止回写未审核草稿');
+      reload();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -95,6 +122,51 @@ export default function OrganizationSettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ShieldCheck className="size-4" />
+            同步安全策略
+          </CardTitle>
+          <CardDescription>这些开关决定 Agent 可以把什么写进开发者的仓库</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <ErrorAlert error={settingsError} />
+          {settingsLoading ? (
+            <Skeleton className="h-20" />
+          ) : (
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel htmlFor="allow-draft-apply">允许回写未审核草稿（include_drafts）</FieldLabel>
+                <FieldDescription>
+                  关闭时（默认），Local MCP 的 <span className="font-mono">pull_platform_updates</span> 与{' '}
+                  <span className="font-mono">preview_apply</span> 请求草稿会被平台拒绝，仓库里只会出现已审核（APPROVED）译文。
+                </FieldDescription>
+              </FieldContent>
+              <Switch
+                id="allow-draft-apply"
+                checked={Boolean(settings?.allowDraftApply)}
+                disabled={!canManage || saving}
+                onCheckedChange={setDraftPolicy}
+              />
+            </Field>
+          )}
+          {settings?.allowDraftApply ? (
+            <Alert variant="warning">
+              <TriangleAlert />
+              <AlertTitle>草稿可以覆盖已审核文案</AlertTitle>
+              <AlertDescription>
+                任何持有 <span className="font-mono">translation.apply</span> scope 的 Token
+                都能把草稿写回仓库，且会替换掉已通过的译文。 仅在明确需要时开启。
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {!canManage && !settingsLoading ? (
+            <p className="text-muted-foreground text-xs">只有组织所有者与管理员可以修改该策略。</p>
+          ) : null}
+        </CardContent>
+      </Card>
 
       <Card className="mt-4">
         <CardHeader>

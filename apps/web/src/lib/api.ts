@@ -3,9 +3,13 @@
 /**
  * Browser API client.
  *
- * The session token is kept in localStorage for the admin UI and sent as a bearer token, which
- * is the same credential the CLI and the MCP servers use — so the UI exercises exactly the same
- * authorization path as every other client (spec §0.1.7).
+ * The browser authenticates with the HttpOnly `localehub_session` cookie the login endpoint sets,
+ * so page JavaScript never holds a credential that an XSS bug could read out of storage. Because
+ * a cookie is attached by the browser rather than by this code, every state-changing request also
+ * carries the double-submit CSRF token from the readable `localehub_csrf` cookie.
+ *
+ * The CLI and the MCP servers keep using bearer tokens; both credentials resolve to the same
+ * actor, so the UI still exercises the same authorization path as every other client.
  */
 
 /**
@@ -24,8 +28,6 @@ function resolveApiBase(): string {
 
 export const API_BASE = resolveApiBase();
 
-const TOKEN_KEY = 'localehub.token';
-
 export interface ApiEnvelope<T> {
   success: boolean;
   data?: T;
@@ -43,24 +45,26 @@ export class ApiError extends Error {
   }
 }
 
-export function getToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return window.localStorage.getItem(TOKEN_KEY);
-}
+const CSRF_COOKIE = 'localehub_csrf';
+const CSRF_HEADER = 'x-csrf-token';
 
-export function setToken(token: string | null): void {
-  if (typeof window === 'undefined') return;
-  if (token) window.localStorage.setItem(TOKEN_KEY, token);
-  else window.localStorage.removeItem(TOKEN_KEY);
+/** The readable half of the double-submit pair. Carries no authority by itself. */
+function csrfToken(): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]!) : null;
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = getToken();
+  const csrf = csrfToken();
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    // Required for the session cookie to travel to an API on another origin (dev, and any
+    // deployment that does not put both behind one hostname).
+    credentials: 'include',
     headers: {
       'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(csrf ? { [CSRF_HEADER]: csrf } : {}),
       ...(init.headers ?? {}),
     },
   });
@@ -196,6 +200,14 @@ export interface SyncSession {
   summary: Record<string, unknown> | null;
   createdAt: string;
   completedAt: string | null;
+}
+
+export interface OrganizationSettings {
+  id: string;
+  name: string;
+  slug: string;
+  allowDraftApply: boolean;
+  createdAt: string;
 }
 
 export interface Me {
