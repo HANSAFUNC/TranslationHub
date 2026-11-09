@@ -1,0 +1,8 @@
+node_modules
+dist
+.next
+coverage
+LocaleHub_Agent_开发交付包
+.demo-workspace
+.demo-workspace-integration
+pnpm-lock.yaml

@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: localehub
+        ports: ["55432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["56379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://localehub_app:localehub@127.0.0.1:55432/localehub?schema=public
+      MIGRATE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55432/localehub?schema=public
+      REDIS_URL: redis://127.0.0.1:56379
+      AUTH_SECRET: ci-only-secret-value-not-production
+      ENCRYPTION_KEY: ci-only-encryption-key-not-production
+      LOCALEHUB_API_URL: http://localhost:3001/api/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create application role (mirrors docker/postgres/init/01-init.sql)
+        run: |
+          PGPASSWORD=postgres psql -h 127.0.0.1 -p 55432 -U postgres -d localehub -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'localehub_app') THEN
+              CREATE ROLE localehub_app LOGIN PASSWORD 'localehub' NOSUPERUSER NOBYPASSRLS;
+            END IF;
+          END $$;
+          GRANT USAGE ON SCHEMA public TO localehub_app;
+          SQL
+      - name: Apply migrations
+        run: pnpm --filter @localehub/database migrate:deploy
+        env:
+          DATABASE_URL: ${{ env.MIGRATE_DATABASE_URL }}
+      - name: Generate Prisma client
+        run: pnpm --filter @localehub/database generate
+      - run: pnpm -r build
+      - run: pnpm -r typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - name: Integration tests (boots the API itself)
+        run: pnpm test:integration
+      - name: Acceptance demo (scenario A-E)
+        run: node apps/e2e-demo/dist/run-demo.js
+      - name: Docker builds
+        run: |
+          docker build -f docker/api.Dockerfile -t localehub-api:ci .
+          docker build -f docker/web.Dockerfile -t localehub-web:ci .

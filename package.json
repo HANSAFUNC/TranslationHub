@@ -1,0 +1,41 @@
+{
+  "name": "localehub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LocaleHub - localization management platform with MCP-based bidirectional repository sync",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' build && pnpm -r --filter './apps/**' build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run --project unit",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:all": "vitest run",
+    "db:up": "docker compose up -d postgres redis",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @localehub/database migrate:deploy",
+    "db:generate": "pnpm --filter @localehub/database generate",
+    "db:setup": "pnpm --filter @localehub/database setup",
+    "db:seed": "pnpm --filter @localehub/database generate && pnpm --filter @localehub/cli build && pnpm --filter @localehub/cli seed",
+    "dev:api": "pnpm --filter @localehub/api dev",
+    "dev:web": "pnpm --filter @localehub/web dev",
+    "dev:worker": "pnpm --filter @localehub/worker dev",
+    "demo": "pnpm --filter @localehub/e2e-demo demo",
+    "format": "prettier --write \"apps/**/*.{ts,tsx,css,json}\" \"packages/**/*.ts\" \"*.{json,md}\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx,css,json}\" \"packages/**/*.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "@eslint/js": "^9.17.0",
+    "typescript-eslint": "^8.19.0",
+    "prettier": "^3.4.2",
+    "prettier-plugin-tailwindcss": "^0.6.9"
+  }
+}

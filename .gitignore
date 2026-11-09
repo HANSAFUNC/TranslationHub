@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+.next/
+coverage/
+*.log
+.DS_Store
+env
+.env
+.env.local
+.env.*.local
+localehub.env
+!env.example
+
+# Local MCP runtime artifacts must never be committed
+.localehub/backups/
+.localehub/cache/
+.localehub/patches/
+.localehub/*.local.yaml
+
+# generated
+packages/database/generated/
+*.tsbuildinfo
+
+# e2e demo scratch workspace (created by `pnpm demo`)
+.demo-workspace/
+.demo-workspace-integration/
