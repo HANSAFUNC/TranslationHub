@@ -1,25 +1,10 @@
-import {
-  CanActivate,
-  type ExecutionContext,
-  Injectable,
-  SetMetadata,
-  createParamDecorator,
-} from '@nestjs/common';
+import { CanActivate, type ExecutionContext, Injectable, SetMetadata, createParamDecorator } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import jwt from 'jsonwebtoken';
-import type { Request } from 'express';
-import {
-  ErrorCode,
-  LocaleHubError,
-  Role,
-  type McpScope,
-} from '@localehub/contracts';
-import {
-  assertProjectBound,
-  assertRole,
-  assertScope,
-  type ActorContext,
-} from '@localehub/permissions';
+import { randomBytes } from 'node:crypto';
+import type { Request, Response } from 'express';
+import { ErrorCode, LocaleHubError, Role, type McpScope } from '@localehub/contracts';
+import { assertProjectBound, assertRole, assertScope, type ActorContext } from '@localehub/permissions';
 import { hashToken } from '@localehub/domain';
 import { PrismaService } from './prisma.service';
 import { enrichContext } from './request-context';
@@ -82,17 +67,23 @@ export class AuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const header = request.headers.authorization;
-    const token = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7).trim() : null;
-    if (!token) {
-      throw new LocaleHubError(ErrorCode.UNAUTHENTICATED, 'Missing bearer token', 401);
+
+    // Production deployments behind nginx terminate TLS; anything that reaches the app in
+    // cleartext there carries a bearer token over the wire, so refuse instead of serving it.
+    assertTransportIsSecure(request);
+
+    const credential = readCredential(request);
+    if (!credential) {
+      throw new LocaleHubError(ErrorCode.UNAUTHENTICATED, 'Missing credentials', 401);
     }
 
-    const actor = token.startsWith('lh_mcp_') || token.startsWith('lh_api_')
-      ? await this.authenticateApiToken(token, request)
-      : await this.authenticateSession(token, request);
+    const actor =
+      credential.kind === 'bearer' && (credential.value.startsWith('lh_mcp_') || credential.value.startsWith('lh_api_'))
+        ? await this.authenticateApiToken(credential.value, request)
+        : await this.authenticateSession(credential, request);
 
-    const requiredScopes = this.reflector.getAllAndOverride<McpScope[]>('scopes', [context.getHandler(), context.getClass()]) ?? [];
+    const requiredScopes =
+      this.reflector.getAllAndOverride<McpScope[]>('scopes', [context.getHandler(), context.getClass()]) ?? [];
     for (const scope of requiredScopes) assertScope(actor, scope);
 
     // Project scoped role check: only applies when the route actually carries a project id.
@@ -143,21 +134,20 @@ export class AuthGuard implements CanActivate {
       isPlatformAdmin: client.user.isPlatformAdmin,
       boundProjectIds: client.projectIds,
       actorType: 'mcp',
+      credentialSource: 'bearer',
     };
 
     const projectId = (request.params?.projectId ?? request.body?.projectId) as string | undefined;
     if (projectId) assertProjectBound(actor, projectId);
 
     // Track last use without blocking the request path.
-    void this.prisma.mcpClient
-      .update({ where: { id: client.id }, data: { lastUsedAt: new Date() } })
-      .catch(() => undefined);
+    void this.prisma.mcpClient.update({ where: { id: client.id }, data: { lastUsedAt: new Date() } }).catch(() => undefined);
 
     return actor;
   }
 
-  private async authenticateSession(token: string, request: AuthenticatedRequest): Promise<ActorContext> {
-    const claims = verifySessionToken(token);
+  private async authenticateSession(credential: Credential, request: AuthenticatedRequest): Promise<ActorContext> {
+    const claims = verifySessionToken(credential.value);
     const user = await this.prisma.tenant.withoutTenantScope((tx) =>
       tx.user.findUnique({
         where: { id: claims.sub },
@@ -182,10 +172,88 @@ export class AuthGuard implements CanActivate {
       scopes: [],
       isPlatformAdmin: user.isPlatformAdmin,
       actorType: 'user',
+      credentialSource: credential.kind,
     };
   }
 }
 
+/* ------------------------------------------------------------ credential plumbing */
+
+export type CredentialKind = 'bearer' | 'cookie';
+
+export interface Credential {
+  kind: CredentialKind;
+  value: string;
+}
+
+export function sessionCookieName(): string {
+  return process.env.SESSION_COOKIE_NAME ?? 'localehub_session';
+}
+
+export function csrfCookieName(): string {
+  return process.env.CSRF_COOKIE_NAME ?? 'localehub_csrf';
+}
+
+export function csrfHeaderName(): string {
+  return process.env.CSRF_HEADER_NAME ?? 'x-csrf-token';
+}
+
+const SESSION_TTL_SECONDS = 12 * 60 * 60;
+
+/**
+ * Issue both cookies for a browser session.
+ *
+ * The session cookie is HttpOnly so page JavaScript can never read it, which means an XSS bug
+ * cannot lift the credential the way it could from localStorage. The CSRF cookie is deliberately
+ * readable — it is the second half of the double-submit pair and carries no authority on its own.
+ */
+export function setSessionCookie(response: Response, token: string): void {
+  const common = {
+    sameSite: 'lax' as const,
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: SESSION_TTL_SECONDS * 1_000,
+  };
+  response.cookie(sessionCookieName(), token, { ...common, httpOnly: true });
+  response.cookie(csrfCookieName(), randomBytes(32).toString('base64url'), { ...common, httpOnly: false });
+}
+
+/** Clear both cookies; the browser drops them when the value is empty and maxAge is zero. */
+export function clearSessionCookies(response: Response): void {
+  response.clearCookie(sessionCookieName(), { path: '/' });
+  response.clearCookie(csrfCookieName(), { path: '/' });
+}
+
+/**
+ * A request may carry either a bearer credential (CLI, MCP servers, integration scripts) or the
+ * browser's HttpOnly session cookie. The kind is recorded on the actor because a cookie is sent
+ * ambiently by the browser and therefore additionally needs CSRF verification, while a bearer
+ * token is only ever attached deliberately by the caller.
+ */
+function readCredential(request: AuthenticatedRequest): Credential | null {
+  const header = request.headers.authorization;
+  if (typeof header === 'string' && header.startsWith('Bearer ')) {
+    const value = header.slice(7).trim();
+    if (value) return { kind: 'bearer', value };
+  }
+  const cookies = (request as AuthenticatedRequest & { cookies?: Record<string, string> }).cookies;
+  const cookie = cookies?.[sessionCookieName()];
+  if (cookie) return { kind: 'cookie', value: cookie };
+  return null;
+}
+
+function assertTransportIsSecure(request: AuthenticatedRequest): void {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (process.env.ALLOW_INSECURE_HTTP === 'true') return;
+  const forwarded = request.headers['x-forwarded-proto'];
+  const proto = typeof forwarded === 'string' ? forwarded.split(',')[0]!.trim() : request.protocol;
+  if (proto === 'https') return;
+  throw new LocaleHubError(
+    ErrorCode.INSECURE_TRANSPORT,
+    'Refusing to authenticate over plain HTTP in production. Terminate TLS in front of the API, or set ALLOW_INSECURE_HTTP=true if the hop is already protected.',
+    403,
+  );
+}
 
 export const Public = (): MethodDecorator & ClassDecorator => SetMetadata('isPublic', true);
 export const RequireScopes = (...scopes: McpScope[]): MethodDecorator => SetMetadata('scopes', scopes);

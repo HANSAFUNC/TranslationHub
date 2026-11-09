@@ -221,6 +221,10 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  /// Allows `include_drafts` on pull/apply: unapproved drafts may then be written into a
+  /// repository, replacing approved copy. Off by default; see docs/SYNC.md.
+  allowDraftApply Boolean @default(false) @map("allow_draft_apply")
+
   memberships            Membership[]
   projects               Project[]
   mcpClients             McpClient[]

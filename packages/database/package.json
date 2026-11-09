@@ -8,11 +8,12 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "generate": "prisma generate",
-    "migrate:dev": "prisma migrate dev",
-    "migrate:deploy": "prisma migrate deploy",
-    "migrate:reset": "prisma migrate reset --force",
-    "setup": "prisma migrate deploy && prisma generate",
-    "seed": "node dist/seed.js"
+    "migrate:dev": "node ../../scripts/run-with-env.mjs --database-url-var MIGRATE_DATABASE_URL prisma migrate dev",
+    "migrate:deploy": "node ../../scripts/run-with-env.mjs --database-url-var MIGRATE_DATABASE_URL prisma migrate deploy",
+    "migrate:reset": "node ../../scripts/run-with-env.mjs --database-url-var MIGRATE_DATABASE_URL prisma migrate reset --force",
+    "setup": "node ../../scripts/run-with-env.mjs --database-url-var MIGRATE_DATABASE_URL prisma migrate deploy && prisma generate",
+    "seed": "node dist/seed.js",
+    "studio": "node ../../scripts/run-with-env.mjs prisma studio"
   },
   "dependencies": {
     "@localehub/contracts": "workspace:*",

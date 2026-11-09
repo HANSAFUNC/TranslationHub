@@ -16,6 +16,7 @@ import { Actor, RequireRole, RequireScopes } from '../../common/auth';
 import { AuditService } from '../../common/audit.service';
 import { zodBody } from '../../common/zod.pipe';
 import { SyncService } from '@localehub/domain';
+import { OrganizationsService } from '../organizations/organizations.service';
 
 const changesQuerySchema = z.object({
   locale: z.union([z.string(), z.array(z.string())]).optional(),
@@ -43,7 +44,11 @@ export class SyncController {
   constructor(
     private readonly sync: SyncService,
     private readonly audit: AuditService,
+    private readonly organizations: OrganizationsService,
   ) {}
+
+  /** Statuses that only an opted-in organization may pull into a repository. */
+  private static readonly UNAPPROVED = ['DRAFT', 'PENDING_REVIEW'];
 
   /* -------------------------------------------------- repository connections */
 
@@ -82,7 +87,10 @@ export class SyncController {
 
   /** Organization-wide recent sync sessions (dashboard widget). */
   @Get('sync/recent-sessions')
-  async recentSessions(@Actor() actor: ActorContext, @Query(zodBody(z.object({ limit: z.coerce.number().int().positive().max(100).optional() }))) query: { limit?: number }) {
+  async recentSessions(
+    @Actor() actor: ActorContext,
+    @Query(zodBody(z.object({ limit: z.coerce.number().int().positive().max(100).optional() }))) query: { limit?: number },
+  ) {
     return this.sync.listRecentSessions(actor, query.limit ?? 20);
   }
 
@@ -126,6 +134,9 @@ export class SyncController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     assertRole(actor, body.projectId, Role.DEVELOPER);
+    if (body.includeDrafts) {
+      await this.organizations.assertDraftApplyAllowed(actor);
+    }
     const result = await this.sync.createPreview(
       {
         projectId: body.projectId,
@@ -217,7 +228,15 @@ export class SyncController {
   async baseline(
     @Actor() actor: ActorContext,
     @Param('projectId') projectId: string,
-    @Query(zodBody(z.object({ connection_id: z.string().optional(), since_revision: z.coerce.number().optional(), locales: z.union([z.string(), z.array(z.string())]).optional() })))
+    @Query(
+      zodBody(
+        z.object({
+          connection_id: z.string().optional(),
+          since_revision: z.coerce.number().optional(),
+          locales: z.union([z.string(), z.array(z.string())]).optional(),
+        }),
+      ),
+    )
     query: { connection_id?: string; since_revision?: number; locales?: string | string[] },
   ) {
     assertRole(actor, projectId, Role.DEVELOPER);
@@ -238,6 +257,9 @@ export class SyncController {
     assertRole(actor, projectId, Role.DEVELOPER);
     const locales = Array.isArray(query.locale) ? query.locale : query.locale ? [query.locale] : undefined;
     const statuses = Array.isArray(query.status) ? query.status : [query.status ?? 'APPROVED'];
+    if (statuses.some((status) => SyncController.UNAPPROVED.includes(status))) {
+      await this.organizations.assertDraftApplyAllowed(actor);
+    }
     return this.sync.getChanges(
       {
         projectId,
@@ -320,7 +342,14 @@ export class SyncController {
   async events(
     @Actor() actor: ActorContext,
     @Param('projectId') projectId: string,
-    @Query(zodBody(z.object({ since_revision: z.coerce.number().int().nonnegative().optional(), limit: z.coerce.number().int().positive().max(500).optional() })))
+    @Query(
+      zodBody(
+        z.object({
+          since_revision: z.coerce.number().int().nonnegative().optional(),
+          limit: z.coerce.number().int().positive().max(500).optional(),
+        }),
+      ),
+    )
     query: { since_revision?: number; limit?: number },
   ) {
     assertRole(actor, projectId, Role.READONLY);

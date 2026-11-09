@@ -1,9 +1,4 @@
-import {
-  ErrorCode,
-  LocaleHubError,
-  Role,
-  type McpScope,
-} from '@localehub/contracts';
+import { ErrorCode, LocaleHubError, Role, type McpScope } from '@localehub/contracts';
 
 /**
  * Authorization rules shared by REST API, Remote MCP, Local MCP and the Web UI.
@@ -26,6 +21,12 @@ export interface ActorContext {
   boundProjectIds?: string[];
   /** recorded on audit rows and translation versions */
   actorType?: 'user' | 'mcp' | 'system';
+  /**
+   * How the request authenticated. A `cookie` credential is attached ambiently by the browser,
+   * so it additionally has to pass CSRF verification; a `bearer` credential is attached
+   * deliberately by the caller and does not.
+   */
+  credentialSource?: 'bearer' | 'cookie';
 }
 
 const ROLE_WEIGHT: Record<Role, number> = {
@@ -58,12 +59,10 @@ export function roleAtLeast(actor: ActorContext, projectId: string, required: Ro
 
 export function assertRole(actor: ActorContext, projectId: string, required: Role): void {
   if (!roleAtLeast(actor, projectId, required)) {
-    throw new LocaleHubError(
-      ErrorCode.ROLE_INSUFFICIENT,
-      `Role ${required} or higher is required for this project`,
-      403,
-      { required, projectId },
-    );
+    throw new LocaleHubError(ErrorCode.ROLE_INSUFFICIENT, `Role ${required} or higher is required for this project`, 403, {
+      required,
+      projectId,
+    });
   }
 }
 

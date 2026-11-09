@@ -42,10 +42,7 @@ function applyEnvFile(path: string): void {
     if (index === -1) continue;
     const key = line.slice(0, index).trim();
     let value = line.slice(index + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1);
     }
     if (process.env[key] === undefined) process.env[key] = value;
@@ -83,6 +80,19 @@ const envSchema = z.object({
   WORKER_PORT: z.coerce.number().default(3002),
   MCP_REMOTE_PORT: z.coerce.number().default(3003),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
+  /** Express `trust proxy`: number of hops, or true/false. Off by default so X-Forwarded-For
+   *  cannot be spoofed to dodge rate limits unless a reverse proxy really is in front. */
+  TRUST_PROXY: z.string().default('false'),
+  RATE_LIMIT_ENABLED: z.coerce.boolean().default(true),
+  RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  /** Requests per window for an authenticated actor (interactive session or MCP token). */
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(600),
+  /** Requests per window per IP for unauthenticated credential-submitting routes. */
+  RATE_LIMIT_AUTH_MAX: z.coerce.number().int().positive().default(12),
+  /** browser session cookie */
+  SESSION_COOKIE_NAME: z.string().default('localehub_session'),
+  CSRF_COOKIE_NAME: z.string().default('localehub_csrf'),
+  CSRF_HEADER_NAME: z.string().default('x-csrf-token'),
   MCP_REMOTE_ENABLED: z.coerce.boolean().default(true),
   AI_DEFAULT_POLICY: z.string().default('hybrid'),
   SYNC_PLAN_TTL_SECONDS: z.coerce.number().default(1800),
@@ -102,7 +112,9 @@ export function loadEnv(cwd?: string): AppEnv {
     API_BASE_URL: process.env.API_BASE_URL,
     DATABASE_URL: readSecret('DATABASE_URL'),
     REDIS_URL: readSecret('REDIS_URL', { fallback: 'redis://127.0.0.1:56379' }),
-    AUTH_SECRET: readSecret('AUTH_SECRET', { fallback: process.env.NODE_ENV === 'production' ? undefined : 'dev-only-auth-secret-change-me' }),
+    AUTH_SECRET: readSecret('AUTH_SECRET', {
+      fallback: process.env.NODE_ENV === 'production' ? undefined : 'dev-only-auth-secret-change-me',
+    }),
     ENCRYPTION_KEY: readSecret('ENCRYPTION_KEY', {
       fallback: process.env.NODE_ENV === 'production' ? undefined : 'dev-only-encryption-key-change-me',
     }),
@@ -111,6 +123,14 @@ export function loadEnv(cwd?: string): AppEnv {
     WORKER_PORT: process.env.WORKER_PORT,
     MCP_REMOTE_PORT: process.env.MCP_REMOTE_PORT,
     CORS_ORIGINS: process.env.CORS_ORIGINS,
+    TRUST_PROXY: process.env.TRUST_PROXY,
+    RATE_LIMIT_ENABLED: process.env.RATE_LIMIT_ENABLED,
+    RATE_LIMIT_WINDOW_SECONDS: process.env.RATE_LIMIT_WINDOW_SECONDS,
+    RATE_LIMIT_MAX: process.env.RATE_LIMIT_MAX,
+    RATE_LIMIT_AUTH_MAX: process.env.RATE_LIMIT_AUTH_MAX,
+    SESSION_COOKIE_NAME: process.env.SESSION_COOKIE_NAME,
+    CSRF_COOKIE_NAME: process.env.CSRF_COOKIE_NAME,
+    CSRF_HEADER_NAME: process.env.CSRF_HEADER_NAME,
     MCP_REMOTE_ENABLED: process.env.MCP_REMOTE_ENABLED,
     AI_DEFAULT_POLICY: process.env.AI_DEFAULT_POLICY,
     SYNC_PLAN_TTL_SECONDS: process.env.SYNC_PLAN_TTL_SECONDS,

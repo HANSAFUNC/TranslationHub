@@ -3,6 +3,8 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { SyncService } from '@localehub/domain';
 import { PrismaService } from './common/prisma.service';
 import { AuthGuard } from './common/auth';
+import { RateLimitGuard, RateLimitService } from './common/rate-limit';
+import { CsrfGuard } from './common/csrf';
 import { ApiExceptionFilter } from './common/api-exception.filter';
 import { ResponseEnvelopeInterceptor } from './common/response.interceptor';
 import { RequestContextMiddleware } from './common/request-context.middleware';
@@ -21,6 +23,8 @@ import { QaService } from './modules/qa/qa.service';
 import { ContentController } from './modules/misc/content.controller';
 import { PlatformController } from './modules/misc/platform.controller';
 import { McpController } from './modules/mcp/mcp.controller';
+import { OrganizationsController } from './modules/organizations/organizations.controller';
+import { OrganizationsService } from './modules/organizations/organizations.service';
 
 @Module({
   controllers: [
@@ -34,6 +38,7 @@ import { McpController } from './modules/mcp/mcp.controller';
     ContentController,
     PlatformController,
     McpController,
+    OrganizationsController,
   ],
   providers: [
     PrismaService,
@@ -42,8 +47,19 @@ import { McpController } from './modules/mcp/mcp.controller';
     ProjectsService,
     TranslationsService,
     QaService,
-    { provide: SyncService, useFactory: (prisma: PrismaService) => new SyncService(prisma, prisma.tenant), inject: [PrismaService] },
+    OrganizationsService,
+    {
+      provide: SyncService,
+      useFactory: (prisma: PrismaService) => new SyncService(prisma, prisma.tenant),
+      inject: [PrismaService],
+    },
+    RateLimitService,
+    // Order matters: Nest runs global guards in registration order. Authentication resolves the
+    // actor, so the limiter can key on it (and on IP for the public credential routes), and CSRF
+    // verification needs to know whether the credential was a cookie.
     { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: RateLimitGuard },
+    { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_FILTER, useClass: ApiExceptionFilter },
     { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },
   ],

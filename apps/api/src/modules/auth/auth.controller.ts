@@ -4,7 +4,7 @@ import type { Response } from 'express';
 import { ErrorCode, LocaleHubError } from '@localehub/contracts';
 import { hashPassword, verifyPassword } from '@localehub/domain';
 import { PrismaService } from '../../common/prisma.service';
-import { issueSessionToken, Public, type AuthenticatedRequest } from '../../common/auth';
+import { clearSessionCookies, issueSessionToken, Public, setSessionCookie, type AuthenticatedRequest } from '../../common/auth';
 import { Actor } from '../../common/auth';
 import type { ActorContext } from '@localehub/permissions';
 import { zodBody } from '../../common/zod.pipe';
@@ -37,7 +37,10 @@ export class AuthController {
    */
   @Public()
   @Post('register')
-  async register(@Body(zodBody(registerSchema)) body: z.infer<typeof registerSchema>) {
+  async register(
+    @Body(zodBody(registerSchema)) body: z.infer<typeof registerSchema>,
+    @Res({ passthrough: true }) response: Response,
+  ) {
     const userCount = await this.prisma.user.count();
     if (userCount > 0) {
       throw new LocaleHubError(
@@ -65,6 +68,7 @@ export class AuthController {
       isPlatformAdmin: true,
       orgRole: 'ORG_OWNER',
     });
+    setSessionCookie(response, token);
     return { token, user: { id: user.user.id, email: user.user.email, name: user.user.name }, organization: user.organization };
   }
 
@@ -94,12 +98,7 @@ export class AuthController {
       isPlatformAdmin: user.isPlatformAdmin,
       orgRole: membership.role as never,
     });
-    response.cookie('localehub_session', token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 12 * 60 * 60 * 1000,
-    });
+    setSessionCookie(response, token);
     return {
       token,
       user: { id: user.id, email: user.email, name: user.name, isPlatformAdmin: user.isPlatformAdmin },
@@ -153,29 +152,26 @@ export class AuthController {
       isPlatformAdmin: membership.user.isPlatformAdmin,
       orgRole: membership.role as never,
     });
-    response.cookie('localehub_session', token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 12 * 60 * 60 * 1000,
-    });
+    setSessionCookie(response, token);
     return { token };
   }
 
   @Post('logout')
   async logout(@Res({ passthrough: true }) response: Response) {
-    response.clearCookie('localehub_session');
+    clearSessionCookies(response);
     return { ok: true };
   }
 }
 
 function slug(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .slice(0, 60) || `org-${Date.now().toString(36)}`;
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^\w\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .slice(0, 60) || `org-${Date.now().toString(36)}`
+  );
 }
 
 export type { AuthenticatedRequest };
