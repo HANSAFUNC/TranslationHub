@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -6,6 +6,7 @@ import { ApiClient } from '@localehub/api-client';
 import { LocalMcpServices } from '@localehub/mcp-local';
 import { PrismaClient } from '@localehub/database';
 import { loadLocalConfig } from '@localehub/workspace';
+import { ensureApi, type ApiHandle } from './api-harness';
 
 /**
  * Integration suite for the acceptance criteria in spec §16.1/§16.2.
@@ -18,7 +19,7 @@ const ROOT = resolve(__dirname, '../../..');
 const API_BASE = process.env.LOCALEHUB_API_URL ?? 'http://localhost:3001/api/v1';
 const WORKSPACE = process.env.IT_WORKSPACE ?? join(ROOT, '.demo-workspace-integration');
 
-let apiProcess: ChildProcess | null = null;
+let api: ApiHandle | null = null;
 let session: { token: string; projectId: string };
 let admin: ApiClient;
 let token: string;
@@ -27,24 +28,6 @@ const runId = Date.now().toString(36);
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
-}
-
-async function apiReachable(): Promise<boolean> {
-  try {
-    const response = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(2000) });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForApi(timeoutMs = 60_000): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await apiReachable()) return true;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
-  }
-  return false;
 }
 
 async function fetchJson(path: string, method: string, body?: unknown): Promise<Record<string, unknown>> {
@@ -77,7 +60,9 @@ async function ensureUser(email: string, password: string): Promise<void> {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`SELECT set_config('app.bypass_rls', 'on', true)`);
       const user = await tx.user.create({ data: { email, name: 'Integration Admin', passwordHash, isPlatformAdmin: false } });
-      const organization = await tx.organization.create({ data: { name: `IT Org ${email}`, slug: `it-${runId}-${Date.now().toString(36)}` } });
+      const organization = await tx.organization.create({
+        data: { name: `IT Org ${email}`, slug: `it-${runId}-${Date.now().toString(36)}` },
+      });
       await tx.membership.create({ data: { organizationId: organization.id, userId: user.id, role: 'ORG_OWNER' } });
     });
   } finally {
@@ -86,18 +71,7 @@ async function ensureUser(email: string, password: string): Promise<void> {
 }
 
 beforeAll(async () => {
-  if (!(await apiReachable())) {
-    if (!existsSync(join(ROOT, 'apps/api/dist/main.js'))) {
-      throw new Error('apps/api is not built. Run `pnpm -r build` before the integration suite.');
-    }
-    apiProcess = spawn('node', [join(ROOT, 'apps/api/dist/main.js')], {
-      cwd: ROOT,
-      stdio: 'ignore',
-      detached: false,
-    });
-    const ready = await waitForApi();
-    if (!ready) throw new Error(`API did not become healthy at ${API_BASE}`);
-  }
+  api = await ensureApi(API_BASE, { root: ROOT });
 
   // fresh workspace copy
   rmSync(WORKSPACE, { recursive: true, force: true });
@@ -126,7 +100,9 @@ beforeAll(async () => {
   const configPath = join(WORKSPACE, '.localehub', 'config.yaml');
   writeFileSync(
     configPath,
-    readFileSync(configPath, 'utf8').replace('PROJECT_ID_PLACEHOLDER', project.id).replace('http://localhost:3001/api/v1', API_BASE),
+    readFileSync(configPath, 'utf8')
+      .replace('PROJECT_ID_PLACEHOLDER', project.id)
+      .replace('http://localhost:3001/api/v1', API_BASE),
     'utf8',
   );
   git(WORKSPACE, ['add', '.localehub/config.yaml']);
@@ -156,10 +132,7 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
-  if (apiProcess) {
-    apiProcess.kill('SIGTERM');
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
-  }
+  await api?.stop();
 });
 
 describe('acceptance: local repository ↔ platform sync', () => {
@@ -246,7 +219,9 @@ describe('acceptance: local repository ↔ platform sync', () => {
     expect((pull.changes as { key: string }[]).some((change) => change.key === 'checkout.cart_empty')).toBe(false);
 
     const explicit = await local.pullPlatformUpdates({ locales: ['ja-JP'], include_drafts: true });
-    const draft = (explicit.changes as { key: string; reviewStatus: string }[]).find((change) => change.key === 'checkout.cart_empty');
+    const draft = (explicit.changes as { key: string; reviewStatus: string }[]).find(
+      (change) => change.key === 'checkout.cart_empty',
+    );
     expect(draft?.reviewStatus).toBe('DRAFT');
 
     const plan = await local.previewApply({});
@@ -268,7 +243,10 @@ describe('acceptance: local repository ↔ platform sync', () => {
 
     // history is preserved: the older translation versions still exist
     const entry = await admin.findEntry(session.projectId, 'checkout.cart_empty', 'ja-JP');
-    const detail = await admin.call<{ versions: unknown[] }>('GET', `/projects/${session.projectId}/translations/${entry.entryId}`);
+    const detail = await admin.call<{ versions: unknown[] }>(
+      'GET',
+      `/projects/${session.projectId}/translations/${entry.entryId}`,
+    );
     expect(detail.versions.length).toBeGreaterThanOrEqual(2);
   }, 60_000);
 
@@ -319,16 +297,32 @@ describe('acceptance: local repository ↔ platform sync', () => {
 
     await local.scanLocalProject({});
     const preview = await local.previewSync({ direction: 'bidirectional' });
-    const item = (preview.changes as { key: string; locale: string; action: string; reason: string; base: string | null; local: string | null; platformValue: string | null }[]).find(
-      (change) => change.key === 'greeting' && change.locale === 'ja-JP',
-    );
-    expect({ action: item?.action, reason: item?.reason, base: item?.base, local: item?.local, remote: item?.platformValue }).toMatchObject({
+    const item = (
+      preview.changes as {
+        key: string;
+        locale: string;
+        action: string;
+        reason: string;
+        base: string | null;
+        local: string | null;
+        platformValue: string | null;
+      }[]
+    ).find((change) => change.key === 'greeting' && change.locale === 'ja-JP');
+    expect({
+      action: item?.action,
+      reason: item?.reason,
+      base: item?.base,
+      local: item?.local,
+      remote: item?.platformValue,
+    }).toMatchObject({
       action: 'CONVERGED',
     });
     // checkout.cart_empty/ja-JP is intentionally left STALE by the previous scenario (its source
     // changed after the platform value was written), so it must *not* silently converge: the
     // engine reports SOURCE_VERSION_CHANGED instead.
-    const conflicts = (preview.changes as { key: string; action: string; reason: string }[]).filter((change) => change.action === 'CONFLICT');
+    const conflicts = (preview.changes as { key: string; action: string; reason: string }[]).filter(
+      (change) => change.action === 'CONFLICT',
+    );
     expect(conflicts.some((change) => change.key === 'greeting')).toBe(false);
     expect(conflicts.every((change) => change.reason.includes('SOURCE_VERSION'))).toBe(true);
   }, 60_000);
@@ -373,9 +367,9 @@ describe('acceptance: local repository ↔ platform sync', () => {
     } finally {
       await prisma.$disconnect();
     }
-    await expect(
-      local.pushProjectChanges({ sync_plan_id: String(preview.syncPlanId), confirm: true }),
-    ).rejects.toMatchObject({ code: 'SYNC_PLAN_EXPIRED' });
+    await expect(local.pushProjectChanges({ sync_plan_id: String(preview.syncPlanId), confirm: true })).rejects.toMatchObject({
+      code: 'SYNC_PLAN_EXPIRED',
+    });
   }, 60_000);
 
   it('test_mcp_scope_enforced: a token without sync.push cannot push', async () => {
@@ -391,9 +385,9 @@ describe('acceptance: local repository ↔ platform sync', () => {
     });
     await limited.scanLocalProject({});
     const preview = await limited.previewSync({ direction: 'bidirectional' });
-    await expect(
-      limited.pushProjectChanges({ sync_plan_id: String(preview.syncPlanId), confirm: true }),
-    ).rejects.toMatchObject({ code: 'SCOPE_INSUFFICIENT' });
+    await expect(limited.pushProjectChanges({ sync_plan_id: String(preview.syncPlanId), confirm: true })).rejects.toMatchObject({
+      code: 'SCOPE_INSUFFICIENT',
+    });
   }, 60_000);
 
   it('test_tenant_rls_isolation: another organization cannot see this project', async () => {

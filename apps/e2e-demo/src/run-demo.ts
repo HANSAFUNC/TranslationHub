@@ -5,6 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { ApiClient } from '@localehub/api-client';
 import { LocalMcpServices } from '@localehub/mcp-local';
 import { loadLocalConfig } from '@localehub/workspace';
+import { ensureApi, type ApiHandle } from './api-harness';
 
 /**
  * End-to-end acceptance run for the migration scenario in the delivery spec:
@@ -28,6 +29,9 @@ interface Step {
 
 const steps: Step[] = [];
 let failures = 0;
+
+/** Set once the API is reachable, so cleanup runs even when a scenario throws. */
+let api: ApiHandle | null = null;
 
 function step(title: string, detail: string): void {
   steps.push({ title, detail });
@@ -63,6 +67,14 @@ async function main(): Promise<void> {
   git(WORKSPACE, ['commit', '-qm', 'chore: initial demo content']);
   check('demo repository created', existsSync(join(WORKSPACE, 'apps/web/src/locales/en-US/common.json')));
 
+  step('启动 API / ensuring the API is up', apiUrl);
+  api = await ensureApi(apiUrl, { root: ROOT });
+  check(
+    'API reachable',
+    true,
+    api.spawned ? 'started by this run, will be stopped afterwards' : 'already running, left untouched',
+  );
+
   step('登录平台 / signing in to the platform', apiUrl);
   const session = await bootstrapSession(apiUrl, email, password);
   const admin = new ApiClient({ baseUrl: apiUrl, token: session.token });
@@ -71,7 +83,10 @@ async function main(): Promise<void> {
   step('创建项目与语言 / creating the project', 'Demo App (en-US → ja-JP)');
   const project = await admin.getProject(session.projectId);
   check('project exists', Boolean(project.id), `${project.name} (${project.sourceLocale})`);
-  check('target locale configured', project.locales.some((locale) => locale.code === 'ja-JP'));
+  check(
+    'target locale configured',
+    project.locales.some((locale) => locale.code === 'ja-JP'),
+  );
 
   step('签发 MCP Token / issuing an MCP token', 'scopes: read, scan, preview, push, pull, apply');
   const issued = await issueToken(admin, project.id);
@@ -91,7 +106,11 @@ async function main(): Promise<void> {
     env: { ...process.env, LOCALEHUB_TOKEN: issued.token, LOCALEHUB_API_URL: apiUrl } as NodeJS.ProcessEnv,
   });
   const loaded = loadLocalConfig(WORKSPACE);
-  check('local config loads', loaded.config.project.id === session.projectId, `${loaded.configPath} → project ${loaded.config.project.id}`);
+  check(
+    'local config loads',
+    loaded.config.project.id === session.projectId,
+    `${loaded.configPath} → project ${loaded.config.project.id}`,
+  );
 
   /* ---------------------------------------------------------------- scenario A */
 
@@ -133,9 +152,9 @@ async function main(): Promise<void> {
   const applyPreview = await local.previewApply({});
   const applySummary = applyPreview.summary as { ready: number; blocked: number; total: number };
   check('apply plan is ready', applySummary.ready >= 1, JSON.stringify(applySummary));
-  const readyItem = (applyPreview.changes as { key: string; status: string; previousValue: string | null; newValue: string; filePath: string }[]).find(
-    (item) => item.key === 'checkout.pay_now' && item.status === 'READY',
-  );
+  const readyItem = (
+    applyPreview.changes as { key: string; status: string; previousValue: string | null; newValue: string; filePath: string }[]
+  ).find((item) => item.key === 'checkout.pay_now' && item.status === 'READY');
   check(
     'diff shows old value → new value',
     Boolean(readyItem) && readyItem?.previousValue === '今すぐ支払う' && readyItem?.newValue === corrected,
@@ -163,7 +182,10 @@ async function main(): Promise<void> {
   const apply = await local.applyTranslationUpdates({ apply_plan_id: String(applyPreview.applyPlanId), confirm: true });
   check('apply wrote the file', (apply.applied as number) >= 1, `status ${apply.status}`);
 
-  const written = JSON.parse(readFileSync(jaFile, 'utf8')) as { checkout: { pay_now: string; cart_empty: string }; greeting: string };
+  const written = JSON.parse(readFileSync(jaFile, 'utf8')) as {
+    checkout: { pay_now: string; cart_empty: string };
+    greeting: string;
+  };
   check('file contains the corrected value', written.checkout.pay_now === corrected);
   check('unrelated keys preserved', written.checkout.cart_empty === 'カートは空です' && typeof written.greeting === 'string');
 
@@ -173,7 +195,11 @@ async function main(): Promise<void> {
 
   step('场景 B 校验 / verification', '回写后再次校验');
   const validation = await local.validateLocalizationFiles({});
-  check('validation has no errors', (validation.bySeverity as { ERROR: number }).ERROR === 0, JSON.stringify(validation.bySeverity));
+  check(
+    'validation has no errors',
+    (validation.bySeverity as { ERROR: number }).ERROR === 0,
+    JSON.stringify(validation.bySeverity),
+  );
 
   const status = await local.getSyncStatus({});
   check('apply report recorded on the platform', Boolean(status.remote), 'baseline advanced');
@@ -187,7 +213,12 @@ async function main(): Promise<void> {
   const secondSummary = secondPreview.summary as Record<string, number>;
   check(
     'everything is in sync',
-    secondSummary.pushNew + secondSummary.pushUpdated + secondSummary.pullApproved + secondSummary.pullDraft + secondSummary.conflicts === 0,
+    secondSummary.pushNew +
+      secondSummary.pushUpdated +
+      secondSummary.pullApproved +
+      secondSummary.pullDraft +
+      secondSummary.conflicts ===
+      0,
     JSON.stringify(secondSummary),
   );
 
@@ -209,7 +240,9 @@ async function main(): Promise<void> {
   check('unapproved draft never enters the default apply plan', !excludedDraft, 'excluded from APPROVED-only plans');
 
   const draftApplyExplicit = await local.previewApply({ include_drafts: true });
-  const riskyDraft = (draftApplyExplicit.changes as { key: string; status: string }[]).find((item) => item.key === 'checkout.cart_empty');
+  const riskyDraft = (draftApplyExplicit.changes as { key: string; status: string }[]).find(
+    (item) => item.key === 'checkout.cart_empty',
+  );
   check(
     'draft only enters an apply plan with an explicit risk warning',
     Boolean(riskyDraft) && typeof draftApplyExplicit.riskWarning === 'string',
@@ -342,7 +375,10 @@ async function fetchJson(apiUrl: string, path: string, method: string, body?: un
   return payload.data ?? {};
 }
 
-main().catch((error) => {
-  process.stdout.write(`\n\u001b[31mDemo failed:\u001b[0m ${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 1;
-});
+main()
+  .catch((error) => {
+    process.stdout.write(`\n\u001b[31mDemo failed:\u001b[0m ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  })
+  // Runs even when a scenario throws, so a failed demo never leaves a stray API behind.
+  .finally(() => api?.stop());
