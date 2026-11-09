@@ -1,0 +1,7 @@
+{
+  "checkout": {
+    "pay_now": "Pay now",
+    "cart_empty": "Your cart is empty"
+  },
+  "greeting": "Hello {name}, you have %d new messages"
+}

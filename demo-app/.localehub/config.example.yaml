@@ -1,0 +1,45 @@
+version: 1
+project:
+  id: "<LOCALEHUB_PROJECT_ID>"
+  name: "Demo App"
+  sourceLocale: "en-US"
+  platforms: [web, ios, android]
+localehub:
+  apiUrl: "https://localehub.example.com"
+  tokenEnv: "LOCALEHUB_TOKEN"
+workspace:
+  root: "."
+  allowRead: ["src/**", "app/**"]
+  allowWrite:
+    - "apps/web/src/locales/**"
+    - "ios/**/*.strings"
+    - "ios/**/*.stringsdict"
+    - "ios/**/*.xcstrings"
+    - "android/app/src/main/res/values*/**"
+  denyRead: [".env*", "**/secrets/**", "**/credentials/**", "node_modules/**", "Pods/**", "build/**"]
+  denyWrite: [".env*", "**/secrets/**", "**/credentials/**", "**/*.generated.*", "build/**"]
+sync:
+  defaultDirection: bidirectional
+  deletePolicy: archive
+  applyPolicy: approved_only
+  conflictPolicy: manual
+  writeMode: dry_run_by_default
+  preserveUnknownFields: true
+  createBackup: true
+files:
+  - id: web-en
+    platform: web
+    locale: en-US
+    format: json
+    source: true
+    paths: ["apps/web/src/locales/en-US/**/*.json"]
+    keyMode: nested
+    namespaceFromPath: true
+  - id: web-ja
+    platform: web
+    locale: ja-JP
+    format: json
+    source: false
+    paths: ["apps/web/src/locales/ja-JP/**/*.json"]
+    keyMode: nested
+    namespaceFromPath: true

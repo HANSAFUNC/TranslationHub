@@ -1,0 +1,7 @@
+{
+  "checkout": {
+    "pay_now": "今すぐ支払う",
+    "cart_empty": "カートは空です"
+  },
+  "greeting": "こんにちは {name}、新着メッセージが %d 件あります"
+}

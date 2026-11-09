@@ -1,0 +1,63 @@
+version: 1
+project:
+  id: "PROJECT_ID_PLACEHOLDER"
+  name: "Demo App"
+  sourceLocale: "en-US"
+  platforms: [web]
+
+localehub:
+  apiUrl: "http://localhost:3001/api/v1"
+  # Token is read from the environment; never commit it.
+  tokenEnv: "LOCALEHUB_TOKEN"
+
+workspace:
+  root: "."
+  allowRead:
+    - "src/**"
+  allowWrite:
+    - "apps/web/src/locales/**"
+  denyRead:
+    - ".env*"
+    - "**/secrets/**"
+    - "node_modules/**"
+  denyWrite:
+    - ".env*"
+    - "**/secrets/**"
+    - "**/*.generated.*"
+
+sync:
+  defaultDirection: "bidirectional"
+  deletePolicy: "archive"
+  applyPolicy: "approved_only"
+  conflictPolicy: "manual"
+  writeMode: "dry_run_by_default"
+  preserveUnknownFields: true
+  createBackup: true
+  maxFilesPerBatch: 500
+
+files:
+  - id: "web-en"
+    platform: "web"
+    locale: "en-US"
+    format: "json"
+    source: true
+    paths:
+      - "apps/web/src/locales/en-US/**/*.json"
+    keyMode: "nested"
+    namespaceFromPath: true
+
+  - id: "web-ja"
+    platform: "web"
+    locale: "ja-JP"
+    format: "json"
+    source: false
+    paths:
+      - "apps/web/src/locales/ja-JP/**/*.json"
+    keyMode: "nested"
+    namespaceFromPath: true
+
+ignore:
+  keys:
+    - "debug.*"
+  paths:
+    - "**/*.generated.*"
