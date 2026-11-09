@@ -14,19 +14,19 @@
 
 `computeSyncDiff(entry)`，输入 `L`（当前本地）、`R`（当前平台）、`B`（基线）：
 
-| 本地相对 B | 平台相对 B | L 与 R | 结果 |
-|---|---|---|---|
-| 未变 | 未变 | 相同 | `SKIP` |
-| 已变 | 未变 | — | `PUSH_LOCAL` |
-| 未变 | 已变 | — | `PULL_REMOTE`（先预览） |
-| 已变 | 已变 | 相同 | `CONVERGED`（更新基线） |
-| 已变 | 已变 | 不同 | `CONFLICT` |
-| 新 Key | 不存在 | — | `PUSH_NEW` |
-| 不存在 | 平台新增 | — | `PULL_NEW` |
-| 本地删除 | 平台未变 | — | `ARCHIVE_CANDIDATE`（不物理删除） |
-| 本地未变 | 平台删除/归档 | — | `REMOTE_ARCHIVE_CANDIDATE` |
-| 两侧都删除 | — | — | `ARCHIVE_CONVERGED` |
-| 平台侧译文基线源文版本过期 | — | — | `CONFLICT`（`SOURCE_VERSION_CHANGED`） |
+| 本地相对 B                 | 平台相对 B    | L 与 R | 结果                                   |
+| -------------------------- | ------------- | ------ | -------------------------------------- |
+| 未变                       | 未变          | 相同   | `SKIP`                                 |
+| 已变                       | 未变          | —      | `PUSH_LOCAL`                           |
+| 未变                       | 已变          | —      | `PULL_REMOTE`（先预览）                |
+| 已变                       | 已变          | 相同   | `CONVERGED`（更新基线）                |
+| 已变                       | 已变          | 不同   | `CONFLICT`                             |
+| 新 Key                     | 不存在        | —      | `PUSH_NEW`                             |
+| 不存在                     | 平台新增      | —      | `PULL_NEW`                             |
+| 本地删除                   | 平台未变      | —      | `ARCHIVE_CANDIDATE`（不物理删除）      |
+| 本地未变                   | 平台删除/归档 | —      | `REMOTE_ARCHIVE_CANDIDATE`             |
+| 两侧都删除                 | —             | —      | `ARCHIVE_CONVERGED`                    |
+| 平台侧译文基线源文版本过期 | —             | —      | `CONFLICT`（`SOURCE_VERSION_CHANGED`） |
 
 要点：
 
@@ -63,12 +63,12 @@
 
 决策语义：
 
-| 决策 | 平台 | 本地 |
-|---|---|---|
-| `KEEP_LOCAL` | 立即写入新 APPROVED 版本（新 revision 事件） | 不变（本来就是本地值） |
-| `KEEP_REMOTE` | 不变 | 需再次 pull + preview_apply + apply 才写回 |
-| `MANUAL_MERGE` | 写入合并值（新 APPROVED 版本） | 需再次 apply 写回 |
-| `DEFER` | 不变 | 不变 |
+| 决策           | 平台                                         | 本地                                       |
+| -------------- | -------------------------------------------- | ------------------------------------------ |
+| `KEEP_LOCAL`   | 立即写入新 APPROVED 版本（新 revision 事件） | 不变（本来就是本地值）                     |
+| `KEEP_REMOTE`  | 不变                                         | 需再次 pull + preview_apply + apply 才写回 |
+| `MANUAL_MERGE` | 写入合并值（新 APPROVED 版本）               | 需再次 apply 写回                          |
+| `DEFER`        | 不变                                         | 不变                                       |
 
 任何决策都**新增版本**，绝不修改历史版本。已解决冲突不能重复解决（`CONFLICT_ALREADY_RESOLVED`）。
 
@@ -100,20 +100,32 @@ Local MCP 用 `since_revision` 游标拉取，漏掉事件可通过游标补拉�
 
 ## 8. 已实现的自动化测试
 
-| 测试 | 位置 |
-|---|---|
-| `test_bidirectional_three_way_merge`（全分支） | packages/sync-engine/src/__tests__/three-way.test.ts |
-| `test_same_change_converges` | 同上 + 集成测试 |
-| `test_conflict_when_both_sides_changed` | 集成测试 |
-| `test_platform_approved_translation_pulled` | 集成测试 |
-| `test_draft_translation_not_pulled_by_default` | 集成测试 |
-| `test_push_new_key` / `test_idempotent_push` | 集成测试 |
-| `test_preview_plan_expiration` | 集成测试 |
-| `test_local_change_after_preview_blocks_apply` | 集成测试 |
-| `test_apply_creates_backup_and_atomic_write` | 集成测试 |
-| `test_push_source_change_marks_targets_stale` | 集成测试 |
-| `test_apply_report_updates_baseline` | 集成测试 |
-| `test_mcp_scope_enforced` | 集成测试 |
-| `test_tenant_rls_isolation` | 集成测试 |
-| `test_round_trip_preserves_platform_metadata` | packages/format-adapters/src/__tests__/round-trip.test.ts |
-| `test_path_traversal_rejected` / `test_symlink_escape_rejected` / `test_local_mcp_reads_only_allowed_workspace` | packages/workspace/src/__tests__/workspace.test.ts |
+| 测试                                                                                                            | 位置                                                      |
+| --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `test_bidirectional_three_way_merge`（全分支）                                                                  | packages/sync-engine/src/**tests**/three-way.test.ts      |
+| `test_same_change_converges`                                                                                    | 同上 + 集成测试                                           |
+| `test_conflict_when_both_sides_changed`                                                                         | 集成测试                                                  |
+| `test_platform_approved_translation_pulled`                                                                     | 集成测试                                                  |
+| `test_draft_translation_not_pulled_by_default`                                                                  | 集成测试                                                  |
+| `test_push_new_key` / `test_idempotent_push`                                                                    | 集成测试                                                  |
+| `test_preview_plan_expiration`                                                                                  | 集成测试                                                  |
+| `test_local_change_after_preview_blocks_apply`                                                                  | 集成测试                                                  |
+| `test_apply_creates_backup_and_atomic_write`                                                                    | 集成测试                                                  |
+| `test_push_source_change_marks_targets_stale`                                                                   | 集成测试                                                  |
+| `test_apply_report_updates_baseline`                                                                            | 集成测试                                                  |
+| `test_mcp_scope_enforced`                                                                                       | 集成测试                                                  |
+| `test_tenant_rls_isolation`                                                                                     | 集成测试                                                  |
+| `test_round_trip_preserves_platform_metadata`                                                                   | packages/format-adapters/src/**tests**/round-trip.test.ts |
+| `test_path_traversal_rejected` / `test_symlink_escape_rejected` / `test_local_mcp_reads_only_allowed_workspace` | packages/workspace/src/**tests**/workspace.test.ts        |
+
+## 草稿回写的组织级策略
+
+规格 §3.3 step 8 允许用 `include_drafts=true` 把未审核草稿一并拉取/写回。这条路径会**用草稿覆盖
+已审核文案**，因此平台把它收敛成组织级开关：
+
+- `organizations.allow_draft_apply`，默认 `false`。
+- 关闭时，任何请求草稿状态的调用（`GET /projects/:id/sync/changes?status=DRAFT`、
+  `POST /sync/preview` 带 `includeDrafts`）都会被平台以 `POLICY_VIOLATION` 拒绝 —— 判定在**平台侧**，
+  不由运行在开发者机器上的 Local MCP 决定。
+- 开启后行为与规格一致：草稿出现在变更列表里，apply 计划附带 `riskWarning`。
+- 开关位置：Web 后台「组织设置 → 同步安全策略」，或 `PATCH /organization/settings`。

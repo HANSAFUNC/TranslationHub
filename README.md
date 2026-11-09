@@ -193,7 +193,11 @@ docker compose run --rm api pnpm prisma migrate deploy
 ## 安全基线
 
 - 所有租户数据带 `organization_id`，数据库启用 RLS；应用连接使用非 owner 角色。
+- 浏览器会话放在 **HttpOnly Cookie**（页面 JS 读不到），写请求走 **双提交 CSRF Token + Origin 校验**；
+  `localStorage` 中不保存任何凭据。生产环境拒绝在纯 HTTP 上认证。
+- 所有端点限流：已认证请求按 actor 计数，登录/注册按（IP, 账号）计数，超限 429 + `Retry-After`。
 - MCP Token 只存 SHA-256 哈希，明文只显示一次；`sync.push` 与 `translation.apply` 分离授权。
+- `include_drafts`（把未审核草稿写回仓库）由**组织级策略**控制，默认关闭，需组织所有者显式开启。
 - 文件访问受 `workspace.root` / `allowRead` / `allowWrite` / `denyRead` / `denyWrite` 与文件映射共同约束，
   拒绝路径穿越与符号链接逃逸；平台上不存在任何任意本地文件工具。
 - 写文件前校验旧值未被改动，先备份、临时文件 + fsync + 原子 rename，写完重新解析；失败自动回滚。

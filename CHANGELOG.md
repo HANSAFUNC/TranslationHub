@@ -1,5 +1,31 @@
 # Changelog
 
+## 未发布
+
+### 安全基线
+
+- **浏览器会话改为 HttpOnly Cookie**：不再往 `localStorage` 写凭据；写请求使用双提交 CSRF Token，
+  并校验 `Origin`/`Referer` 属于本部署。CLI 与两个 MCP 服务端继续使用 Bearer，两条路径解析到同一个 actor。
+- **全端点限流**：已认证请求按 actor 计数，`/auth/login` 与 `/auth/register` 按（IP, 账号）计数并叠加
+  更宽松的 IP 桶（防密码喷洒、不误伤同一出口 IP 的其他人）。计数存 Redis，多副本共享；
+  响应带 `X-RateLimit-*`，超限 429 + `Retry-After`。
+- **传输与响应头**：`NODE_ENV=production` 下拒绝纯 HTTP 凭据（`INSECURE_TRANSPORT`）；接入 helmet；
+  `TRUST_PROXY` 默认关闭，避免伪造 `X-Forwarded-For` 绕过限流。
+- **草稿回写收敛为组织级策略**：`organizations.allow_draft_apply` 默认 `false`，平台侧拒绝
+  `include_drafts`（`POLICY_VIOLATION`），不再由运行在开发者机器上的 Local MCP 决定。
+- Web 端新增「组织设置 → 同步安全策略」开关与 `GET/PATCH /organization` 接口。
+
+### 修复
+
+- **CI 变绿**：验收演示此前假定 API 已在运行——集成测试在 `afterAll` 里会杀掉它，所以 CI 里演示步骤
+  必然以 `fetch failed` 失败。现在演示与集成测试共用一个 API 启动器（`apps/e2e-demo/src/api-harness.ts`），
+  连不上就自己起、跑完只关自己起的那个。
+- **Web 在本地开发时连不上 API**：`NEXT_PUBLIC_API_BASE_URL` 未设置时回退到同源 `/api/v1`，但 Next
+  只重写了 `/api/proxy`，导致请求打到 Web 自身返回 404。已补 `/api/v1/*` rewrite；浏览器默认走同源，
+  Cookie 保持 first-party，也不再需要 CORS。
+- **`pnpm db:migrate` 在本仓库跑不通**：Prisma 只读 `.env`，而本工作区用的是 `localehub.env`，且迁移必须
+  用 owner 角色。新增 `scripts/run-with-env.mjs`，迁移命令改为 `--database-url-var MIGRATE_DATABASE_URL`。
+
 ## 0.1.0 — 首次交付
 
 ### 新增
