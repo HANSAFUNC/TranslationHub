@@ -14,6 +14,24 @@ pnpm dev:api & pnpm dev:web
 
 ## 2. 生产部署
 
+### 2.0 也可以用整套容器在本地跑一遍
+
+```bash
+docker compose up -d --build        # postgres / redis / api / worker / mcp-remote / web
+open http://localhost:3000
+```
+
+这条栈和本文后面的开发方式等价，但**镜像与线上一致**，所以它能验证到宿主进程验证不到的东西：
+Next 的 `/api/v1` 转发目标在构建期就写死了（见 `docker/web.Dockerfile` 里的说明），运行期再设
+`API_BASE_URL_INTERNAL` 是无效的。
+
+两个只在容器里才会踩到的坑，已在本仓库修好，改 compose 时别退回去：
+
+- **web 的转发目标必须是构建参数**。只写运行环境变量时，容器照常启动、HTML 路由照常 200，
+  但所有 `/api/v1` 调用都会 500。
+- **api 在开发栈里要显式 `ALLOW_INSECURE_HTTP: "true"`**。`NODE_ENV=production` 且没有 TLS 时，
+  登录会成功，之后每个请求都 403 `INSECURE_TRANSPORT`。
+
 ### 2.1 准备 Secret
 
 生产环境**不使用**明文环境变量。创建 `./secrets/` 目录：
@@ -30,6 +48,27 @@ chmod 600 secrets/*
 ```
 
 `secrets/` 已在 `.gitignore` 与 `.dockerignore` 中排除。
+
+### 2.1.1 部署前必须定的公开地址
+
+这三项不是密钥，但**必须**按实际域名给值：生产 overlay 不提供本地默认值，否则页面会把
+`localhost` 当成真实地址发给客户端和开发者。
+
+| 变量              | 含义                                                     | 例                                |
+| ----------------- | -------------------------------------------------------- | --------------------------------- |
+| `MCP_PUBLIC_URL`  | Remote MCP 对外的完整地址，Web UI 与 CLI 都按它生成配置   | `https://localehub.example/mcp`   |
+| `API_BASE_URL`    | 平台 API 的对外地址，会写进 Local MCP 的配置片段         | `https://localehub.example/api/v1` |
+| `CORS_ORIGINS`    | 浏览器访问 Web 的 origin（同源部署就是它自己）           | `https://localehub.example`       |
+
+```bash
+export MCP_PUBLIC_URL=https://localehub.example/mcp
+export API_BASE_URL=https://localehub.example/api/v1
+export CORS_ORIGINS=https://localehub.example
+```
+
+`ALLOW_INSECURE_HTTP` 由生产 overlay 固定为 `"false"`、`TRUST_PROXY` 固定为 `"1"`（前面恰好
+是 nginx 一跳），无需手工设置；开发用的 `compose.yaml` 里 `ALLOW_INSECURE_HTTP: "true"` 只对
+本地明文栈生效。
 
 ### 2.2 TLS 证书
 

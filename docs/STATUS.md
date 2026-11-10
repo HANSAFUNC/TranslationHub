@@ -81,6 +81,30 @@ qa / status / patch / mcp-config / release validate`。
 核对方式（无需 CI 日志权限）：`badge.svg` 与 `actions/workflows/ci.yml` 页面 HTML 均显示
 `completed successfully: Run 5 of CI`。
 
+### 1.10 Docker 栈：两个只在容器里出现的缺陷
+
+此前对镜像的验证只做到「容器起得来 + 路由返回 200」，而页面是纯客户端渲染的，**HTTP 200 与页面
+能不能用无关**。改为整套 `docker compose up` 后用无头浏览器按真实路径验证，暴露两个缺陷：
+
+| #   | 现象                                                              | 根因                                                                                                                                                                                                                                     | 修法                                                                                       |
+| --- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 1   | 页面能开、登录返回 201，但登录后每个 `/api/v1` 请求都 500          | `next.config.ts` 的 `rewrites()` 在**构建期**执行，目标地址被写进 `routes-manifest.json`。`compose.yaml` 只在运行环境设 `API_BASE_URL_INTERNAL`，于是镜像里烘焙的是 `http://localhost:3001`——在容器内那指向 web 容器自己，`ECONNREFUSED` | 改成 `docker/web.Dockerfile` 的构建参数，compose 用 `build.args` 传入                    |
+| 2   | 登录成功后的所有请求 403 `INSECURE_TRANSPORT`                     | `compose.yaml` 给 api 设了 `NODE_ENV=production`（为了让镜像行为贴近生产），但开发栈没有 TLS 终结，守卫据此拒绝一切认证流量。页面照常打开、登录也成功，所以只看「路由 200」永远发现不了 | 开发栈显式 `ALLOW_INSECURE_HTTP: "true"`；生产 overlay 显式设回 `"false"`，避免被环境合并继承 |
+
+生产 overlay 另修四处同源问题（**未实际执行**——`secrets/**` 在本工作区不可读写，无法起生产栈；
+端口与副本的机制用一次性 compose 项目单独实测）：
+
+- api / web 是 `replicas: 2` 却继承宿主端口映射：第二个副本必然 `Bind for 0.0.0.0:3001 failed:
+  port is already allocated`。nginx 是唯一入口，这些服务不该发布宿主端口。
+- **`ports: []` 在 overlay 里是无效写法**，Compose 会忽略空列表并保留基础文件的端口。也就是说
+  overlay 头部写着「PostgreSQL 和 Redis 不暴露到宿主机」，实际上 55432 / 56379 一直暴露着。
+  正确写法是 `ports: !reset []`（v5.1.3 实测：`ports: []` 保留 `published: "3998"`，
+  `!reset []` 清空）。已改 5 个服务，合并结果只剩 nginx 的 80 / 443。
+- 缺 `TRUST_PROXY`：Express 默认把 socket 地址当客户端，nginx 后面所有调用者会共用一个限流桶、
+  共用一条审计身份。设 `"1"`（前面恰好一跳）。
+- `MCP_PUBLIC_URL` / `API_BASE_URL` / `CORS_ORIGINS` 未设，会继承开发默认值：页面会把
+  `localhost` 地址发给客户端，local MCP 也会被指向开发者自己的机器。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态                    | 说明                                                                                                                                                                                                                                                                         |
@@ -96,8 +120,8 @@ qa / status / patch / mcp-config / release validate`。
 | Webhook 事件推送                                    | **未实现**              | 目前依赖 `since_revision` 游标拉取                                                                                                                                                                                                                                           |
 | 多组织切换 UI                                       | 部分                    | API 支持 `switch-organization`，UI 只展示列表                                                                                                                                                                                                                                |
 | 用户管理 UI（邀请/改角色）                          | 部分                    | API `POST /projects/:id/members` 存在，UI 未提供表单                                                                                                                                                                                                                         |
-| 前端单元测试                                        | **未实现**              | 无 Playwright / RTL 用例；仅验证页面可访问（HTTP 200）                                                                                                                                                                                                                       |
-| Docker 镜像构建与运行                               | **已完成（API + Web）** | 两个镜像 `docker build` 均成功（EXIT=0）。API 容器：健康检查 ok、登录成功、`/mcp/tools` 返回 14 local + 15 remote。Web 容器：默认 CMD 启动，8 条路由（`/login` `/projects` `/sync` `/sync/conflicts` `/mcp` `/developers/tokens` `/review` `/qa`）全部 HTTP 200 且含应用内容 |
+| 前端单元测试                                        | **未实现**              | 仓库里没有 Playwright / RTL 用例，也没有进 CI 的浏览器测试。人工验证用无头 Chrome（CDP）脚本，判定标准是「页面出现真实数据且无错误提示」，不是 HTTP 200——后者在 API 全挂时依然成立，本文件 §1.10 就是这么被骗过一次的 |
+| Docker 镜像与整套 compose 栈                        | **已完成**              | `docker compose up -d --build` 起全套（postgres / redis / api / worker / mcp-remote / web）。无头 Chrome 实测 24/24：登录后首页、9 条路由与两张项目详情页都渲染出真实数据（不是只 HTTP 200），`/mcp`「客户端配置」三个片段可渲染可复制，桌面与 390px 均无横向溢出；Remote MCP 用 SDK 客户端握手 15 个工具，本地文件类工具未暴露。**过程中发现并修掉两个只在容器里出现的缺陷，见 §1.10** |
 | i18n Adapter：JSON 数组/ICU AST                     | 部分                    | ICU 复数以字符串形式保存，非 AST 级编辑                                                                                                                                                                                                                                      |
 | `file_hash` 级别的映射变更检测                      | 部分                    | 已存 `local_file_id/path`，`FILE_MAPPING_CHANGED` 冲突原因已定义但未产生                                                                                                                                                                                                     |
 | `organizations` / `users` / `review_actions` 的 RLS | **未覆盖**              | 这三张表没有 `organization_id` 列（`review_actions` 通过 `review_tasks` 关联），未启用行级策略。应用角色可读取全部用户行（含密码哈希）——前提是先通过鉴权；认证路径本就走特权通道。补法见 §5 第 1 项                                                                          |
@@ -147,10 +171,11 @@ pnpm test:integration                          # 25 integration tests passed（1
 node apps/e2e-demo/dist/run-demo.js            # ALL ACCEPTANCE CHECKS PASSED（A–E）
 docker compose config                          # valid
 docker compose -f compose.yaml -f compose.production.yaml config   # valid
-docker build -f docker/api.Dockerfile .        # 成功（localehub-api:test）
+docker compose up -d --build                   # 整套栈起来，5 个服务健康
+docker compose exec -T web node -e "…routes-manifest…"   # 转发目标 = http://api:3001/api/v1
+curl -b cookie http://localhost:3000/api/v1/projects    # 200，走 web 容器转发
 docker run --network host … localehub-api:test # health=ok, login ok, /mcp/tools 返回 14 local + 15 remote
 docker build -f docker/web.Dockerfile .        # 成功（localehub-web:test）
-docker run -p 3040:3000 … localehub-web:test   # 默认 CMD，8 条路由全部 HTTP 200
 pnpm exec eslint . --max-warnings 0            # 0 error / 0 warning
 node apps/e2e-demo/dist/run-demo.js            # 连续两次运行均 ALL ACCEPTANCE CHECKS PASSED
 psql -U localehub_app …                        # 验证 RLS：无 org 上下文 0 行；跨租户写入被拒绝
@@ -185,6 +210,7 @@ curl -o /dev/null -w %{http_code} /login 等     # 8 个页面均 200
 | `pnpm test:integration`                          | 25 passed                               |
 | `node apps/e2e-demo/dist/run-demo.js`            | ALL ACCEPTANCE CHECKS PASSED            |
 | `docker compose config`（含 production overlay） | valid                                   |
+| `docker compose up -d --build`（整套栈）         | 5 个服务全部起，浏览器实测 24/24        |
 | `docker build -f docker/api.Dockerfile .`        | 见下方说明                              |
 
 Docker 镜像构建第一次因 Dockerfile 在 `prisma generate` 之前编译 `packages/database` 而失败
