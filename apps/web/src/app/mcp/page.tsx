@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Boxes, GitBranch, Info, Languages, Plug, ScrollText, Sparkles } from 'lucide-react';
+import { Boxes, GitBranch, Info, KeyRound, Languages, Plug, ScrollText, Sparkles, Terminal } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { CodeBlock } from '@/components/code-block';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorAlert } from '@/components/error-alert';
 import { PageHeader } from '@/components/page-header';
@@ -29,6 +30,10 @@ interface McpTools {
   remote: ToolDescriptor[];
   resources: string[];
   prompts: string[];
+  /** Externally reachable Remote MCP endpoint, as configured on the server. */
+  remoteUrl: string;
+  /** Ready-to-paste configs, generated server-side by the same code the CLI uses. */
+  snippets: { remoteOnly: string; localAndRemote: string; claudeCli: string };
 }
 
 interface Skill {
@@ -67,6 +72,81 @@ function ToolTable({ tools, loading }: { tools?: ToolDescriptor[]; loading: bool
   );
 }
 
+function ClientConfig({ snippets, remoteUrl }: { snippets?: McpTools['snippets']; remoteUrl: string }) {
+  if (!snippets) return <Skeleton className="h-64" />;
+  const remoteOnly = snippets.remoteOnly;
+  const localAndRemote = snippets.localAndRemote;
+  const cli = snippets.claudeCli;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <KeyRound className="size-4" />
+            第一步：签发 Token
+          </CardTitle>
+          <CardDescription>所有 MCP 连接都需要令牌。Token 明文只显示一次，之后只能重新签发。</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button asChild>
+            <Link href="/developers/tokens">
+              <KeyRound data-icon="inline-start" />
+              去签发 Token
+            </Link>
+          </Button>
+          <span className="text-muted-foreground self-center text-xs">
+            只读场景给 <span className="font-mono">project.read · translation.read · glossary.read</span>； 让 Agent 写草稿再加{' '}
+            <span className="font-mono">translation.write</span>。
+          </span>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Plug className="size-4" />
+            Remote MCP（平台侧，无需本地仓库）
+          </CardTitle>
+          <CardDescription>只暴露平台数据，不提供任何本地文件能力。可配在任何机器上，只需要 URL 加 Token。</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <CodeBlock code={remoteOnly} what="Remote MCP 配置" />
+          <div className="flex flex-col gap-2">
+            <span className="text-muted-foreground text-xs">或者用 Claude Code 命令直接添加：</span>
+            <CodeBlock code={cli} what="Claude Code 命令" language="bash" />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <GitBranch className="size-4" />
+            Local MCP + Remote MCP（在仓库里两个都用）
+          </CardTitle>
+          <CardDescription>
+            Local MCP 通过 stdio 在开发者机器上运行，文件访问受 workspace 白名单约束。把下面的内容存成仓库根目录的{' '}
+            <span className="font-mono">.mcp.json</span>。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <CodeBlock code={localAndRemote} what="完整 MCP 配置" />
+          <Alert variant="warning">
+            <Terminal />
+            <AlertTitle>把 Local MCP 的路径换成你自己的</AlertTitle>
+            <AlertDescription>
+              <span className="font-mono text-xs">&lt;path-to-localehub&gt;</span> 要指向这个项目的检出目录； 也可以直接运行{' '}
+              <span className="font-mono text-xs">node apps/cli/dist/bin.js mcp-config --remote {remoteUrl}</span>{' '}
+              生成填好真实路径的版本。
+            </AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function McpPage() {
   const { data, error, loading } = useAsync(() => get<McpTools>('/mcp/tools'), []);
   const { data: skills } = useAsync(() => get<Skill[]>('/skills'), []);
@@ -87,9 +167,13 @@ export default function McpPage() {
       </Alert>
 
       <Tabs defaultValue="local">
-        <TabsList>
+        {/* The registry's TabsList is `inline-flex w-fit`, so it keeps its content width when the
+            viewport shrinks — five tabs then push the page 200px wide on a phone. Let it scroll
+            instead of reflowing, and leave the vendored component untouched. */}
+        <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="local">Local MCP {data ? `(${data.local.length})` : ''}</TabsTrigger>
           <TabsTrigger value="remote">Remote MCP {data ? `(${data.remote.length})` : ''}</TabsTrigger>
+          <TabsTrigger value="config">客户端配置</TabsTrigger>
           <TabsTrigger value="resources">Resources & Prompts</TabsTrigger>
           <TabsTrigger value="skills">Skills {skills ? `(${skills.length})` : ''}</TabsTrigger>
         </TabsList>
@@ -122,6 +206,10 @@ export default function McpPage() {
               <ToolTable tools={data?.remote} loading={loading} />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="config">
+          <ClientConfig snippets={data?.snippets} remoteUrl={data?.remoteUrl ?? ''} />
         </TabsContent>
 
         <TabsContent value="resources" className="grid min-w-0 gap-4 lg:grid-cols-2">

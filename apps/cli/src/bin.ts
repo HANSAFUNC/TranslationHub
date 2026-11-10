@@ -7,6 +7,9 @@ import { LocalMcpServices } from '@localehub/mcp-local';
 import { loadLocalConfig } from '@localehub/workspace';
 import { flagBool, parseArgs } from './args';
 
+/** Repository root: `dist/bin.js` sits two levels below it. */
+const ROOT = resolve(__dirname, '../../..');
+
 /**
  * LocaleHub CLI.
  *
@@ -239,28 +242,24 @@ async function main(): Promise<void> {
       return output(services.createGitPatch({ output_path: flags.output as string | undefined }));
     case 'mcp-config': {
       const loaded = loadLocalConfig(workspace);
-      const remoteUrl = flags.remote as string | undefined;
-      const servers: Record<string, unknown> = {
-        'localehub-local': {
-          command: 'node',
-          args: ['<path-to-localehub>/apps/mcp-local/dist/bin.js', '--stdio', '--workspace', '.'],
-          env: {
-            LOCALEHUB_API_URL: loaded.config.localehub.apiUrl,
-            LOCALEHUB_WORKSPACE: '.',
-            LOCALEHUB_TOKEN: `\${${loaded.tokenEnv}}`,
-          },
-        },
-      };
-      if (remoteUrl) {
-        // The remote server is the one that cannot touch a filesystem, so it takes only a URL and
-        // a token — no workspace, no local config.
-        servers['localehub-remote'] = {
-          type: 'http',
-          url: remoteUrl,
-          headers: { Authorization: `Bearer \${${loaded.tokenEnv}}` },
-        };
-      }
-      process.stdout.write(`${JSON.stringify({ mcpServers: servers }, null, 2)}\n`);
+      // The CLI knows where this checkout is, so it can emit a path that works as-is instead of a
+      // placeholder the user has to fill in.
+      const { mcpClientConfig, formatMcpClientConfig } = await import('@localehub/contracts');
+      process.stdout.write(
+        formatMcpClientConfig(
+          mcpClientConfig({
+            local: {
+              apiUrl: loaded.config.localehub.apiUrl,
+              tokenEnv: loaded.tokenEnv,
+              binPath: resolve(ROOT, 'apps/mcp-local/dist/bin.js'),
+            },
+            remote:
+              typeof flags.remote === 'string'
+                ? { url: flags.remote, tokenEnv: loaded.tokenEnv }
+                : null,
+          }),
+        ),
+      );
       return;
     }
     case 'release': {

@@ -68,6 +68,10 @@ Content-Type: application/json
 Remote MCP 与本仓库、本地配置**无关**：它只需要一个 URL 和一个 Token，因此可以配在任何地方
 （另一台机器、CI、纯平台侧 Agent）。
 
+平台页面「MCP 管理 → 客户端配置」把下面两种片段都列了出来，带复制按钮，URL 取服务端配置的
+`MCP_PUBLIC_URL`；片段由服务端用与 CLI 相同的生成器渲染，两边不会不一致。片段里永远只有
+`${LOCALEHUB_TOKEN}` 这种环境变量引用，不会出现 Token 明文。
+
 生成片段：
 
 ```bash

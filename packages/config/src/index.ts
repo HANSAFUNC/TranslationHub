@@ -112,6 +112,8 @@ const envSchema = z.object({
   CSRF_COOKIE_NAME: z.string().default('localehub_csrf'),
   CSRF_HEADER_NAME: z.string().default('x-csrf-token'),
   MCP_REMOTE_ENABLED: z.coerce.boolean().default(true),
+  /** URL an MCP client should use to reach the Remote MCP. Shown in the web UI and the CLI. */
+  MCP_PUBLIC_URL: z.string().default('http://localhost:3003/mcp'),
   AI_DEFAULT_POLICY: z.string().default('hybrid'),
   SYNC_PLAN_TTL_SECONDS: z.coerce.number().default(1800),
   SYNC_MAX_ENTRIES_PER_BATCH: z.coerce.number().default(20000),
@@ -150,6 +152,7 @@ export function loadEnv(cwd?: string): AppEnv {
     CSRF_COOKIE_NAME: process.env.CSRF_COOKIE_NAME,
     CSRF_HEADER_NAME: process.env.CSRF_HEADER_NAME,
     MCP_REMOTE_ENABLED: process.env.MCP_REMOTE_ENABLED,
+    MCP_PUBLIC_URL: process.env.MCP_PUBLIC_URL,
     AI_DEFAULT_POLICY: process.env.AI_DEFAULT_POLICY,
     SYNC_PLAN_TTL_SECONDS: process.env.SYNC_PLAN_TTL_SECONDS,
     SYNC_MAX_ENTRIES_PER_BATCH: process.env.SYNC_MAX_ENTRIES_PER_BATCH,

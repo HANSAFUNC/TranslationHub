@@ -9,3 +9,4 @@ export * from './keys';
 export * from './schemas';
 export * from './mcp-tools';
 export * from './mcp-schema-export';
+export * from './mcp-config';
