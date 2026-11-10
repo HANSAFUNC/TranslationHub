@@ -99,6 +99,11 @@ export class TokensController {
   @Delete('mcp-tokens/:id')
   @RequireRole(Role.PROJECT_MANAGER)
   async revoke(@Actor() actor: ActorContext, @Param('id') id: string) {
+    // The guard only applies @RequireRole when the route carries a project id, and this one has
+    // none — so without this line the decorator above was decorative: any member, including a
+    // DEVELOPER, could revoke anybody's token in the organization (verified against the running
+    // API). Revoking is an organization-level act here, so check it at that level.
+    assertRole(actor, '', Role.PROJECT_MANAGER);
     const client = await this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
       const found = await tx.mcpClient.findUnique({ where: { id } });
       if (!found) throw new LocaleHubError(ErrorCode.NOT_FOUND, `Token ${id} not found`, 404);

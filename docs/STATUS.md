@@ -137,6 +137,25 @@ qa / status / patch / mcp-config / release validate`。
 | 安全响应头   | helmet（CSP / HSTS / X-Frame-Options / nosniff / COOP 等）                                                        | 预检与业务响应实测                                                    |
 | 草稿回写策略 | `organizations.allow_draft_apply` 默认 false，平台侧拒绝 `POLICY_VIOLATION`                                       | 集成测试 + 演示场景 D + 设置页开关                                    |
 | 同源反代     | Next.js 增加 `/api/v1/*` rewrite，浏览器默认走同源，Cookie 保持 first-party                                       | 无头 Chrome 全流程 20/20                                              |
+| 角色校验     | `@RequireRole` 在 guard 里**只在路由带 projectId 时生效**；不带 projectId 的路由必须在 handler 里补 `assertRole`   | 逐路由审计 + 新增集成测试（见 §1.11）                                 |
+
+### 1.11 `DELETE /mcp-tokens/:id` 的角色校验从未生效
+
+guard 的实现是「`@RequireRole` + 路由带 projectId 才校验」，注释写明不带 projectId 的路由要在
+service 层自己补检查。Token 吊销这条路由两样都没有：既无 projectId 参数，handler 里也没有
+`assertRole`。结果是 `@RequireRole(PROJECT_MANAGER)` 只是装饰——**任何成员（包括 DEVELOPER）
+都能吊销组织里任何人的 Token**，已用真实会话复现（HTTP 200 + `revokedAt` 被写入）。
+
+修法：handler 里补 `assertRole(actor, '', PROJECT_MANAGER)`（与 `POST /skills` 同一写法），
+UI 按 `/auth/me` 的角色隐藏吊销按钮，并让失败有 toast 而不是静默。
+
+审计了全部 23 处 `@RequireRole`：其余 22 处要么路由带 `:projectId`、要么 body 里有 `projectId`、
+要么 handler 里已有 `assertRole`，仅此一处是缺口。逐路由抽查也做了（`POST /skills`、
+`POST /projects/:id/locales` 对 DEVELOPER 正确返回 403）。
+
+回归测试写在 `security.integration.test.ts`：先用未修复的构建确认它失败（期望 403 实得 200），
+再确认修复后通过，并断言「拒绝之后 Token 确实仍有效」与「OWNER 仍可吊销」——只断言状态码会
+漏掉「返回 403 但其实已经写进去了」这类实现。
 
 ## 3. 已知风险与设计取舍
 

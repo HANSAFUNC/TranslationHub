@@ -92,6 +92,27 @@ async function createOrgOwner(email: string, password: string): Promise<void> {
   }
 }
 
+/** Another member of an existing organization, with the given role. */
+async function addMember(
+  organizationId: string,
+  email: string,
+  password: string,
+  role: 'DEVELOPER' | 'REVIEWER' | 'READONLY',
+): Promise<void> {
+  const prisma = new PrismaClient();
+  try {
+    const { hashPassword } = await import('@localehub/domain');
+    const passwordHash = await hashPassword(password);
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`SELECT set_config('app.bypass_rls', 'on', true)`);
+      const user = await tx.user.create({ data: { email, name: 'Security Member', passwordHash, isPlatformAdmin: false } });
+      await tx.membership.create({ data: { organizationId, userId: user.id, role } });
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 beforeAll(async () => {
   api = await ensureApi(API_BASE, { root: ROOT });
 
@@ -251,6 +272,41 @@ describe('organization draft-apply policy', () => {
     const organization = await call<{ allowDraftApply: boolean; name: string }>('/organization', { token: session.token });
     expect(organization.status).toBe(200);
     expect(organization.body.data?.allowDraftApply).toBe(false);
+  });
+});
+
+describe('MCP token permissions', () => {
+  it('refuses a DEVELOPER revoking a token, which the guard alone did not', async () => {
+    // `DELETE /mcp-tokens/:id` carries no project id, and the guard only applies @RequireRole when
+    // one is present — so the decorator on that route decided nothing and any member could revoke
+    // anybody's token in the organization. This is that hole, as an executable check.
+    const email = `sec-dev-${runId}@localehub.dev`;
+    const password = 'developer-password-123';
+    await addMember(session.organizationId, email, password, 'DEVELOPER');
+
+    const devLogin = await call<{ token: string }>('/auth/login', { method: 'POST', body: { email, password } });
+    expect(devLogin.status).toBeLessThan(300);
+    const devToken = devLogin.body.data!.token;
+
+    const created = await call<{ id: string }>('/mcp-tokens', {
+      method: 'POST',
+      token: session.token,
+      body: { name: 'revoke-target', scopes: ['project.read'], expiresInDays: 1 },
+    });
+    expect(created.status).toBe(201);
+    const tokenId = created.body.data!.id;
+
+    const refused = await call(`/mcp-tokens/${tokenId}`, { method: 'DELETE', token: devToken });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error?.code).toBe('ROLE_INSUFFICIENT');
+
+    // The refusal has to have actually prevented the revoke, not just returned 403.
+    const list = await call<{ id: string; revokedAt: string | null }[]>('/mcp-tokens', { token: session.token });
+    expect(list.body.data!.find((token) => token.id === tokenId)?.revokedAt).toBeNull();
+
+    // And the owner still can: the check refuses a role, not everybody.
+    const allowed = await call(`/mcp-tokens/${tokenId}`, { method: 'DELETE', token: session.token });
+    expect(allowed.status).toBe(200);
   });
 });
 
