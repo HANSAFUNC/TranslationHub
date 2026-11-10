@@ -1,25 +1,17 @@
 /**
- * MCP client configuration snippets.
+ * MCP client configuration snippet.
  *
- * Both the CLI (`localehub mcp-config`) and the web UI render these, so they are generated here
- * rather than in either caller — a snippet that disagrees with what the CLI prints is worse than
- * no snippet at all.
+ * Both the CLI (`localehub mcp-config`) and the web UI render this, so it is generated here rather
+ * than in either caller — a snippet that disagrees with what the CLI prints is worse than no
+ * snippet at all.
  *
- * Two rules the snippets follow:
+ * Two rules it follows:
  *   - the token is always an environment-variable reference, never a literal. A pasted literal
  *     ends up in `.mcp.json`, which people commit.
- *   - the Remote MCP entry contains a URL and a token and nothing else. The remote server has no
- *     filesystem access, so a workspace path there would only imply a capability it does not have.
+ *   - the entry contains a URL and a token and nothing else. There is one server, it runs on the
+ *     platform, and it has no filesystem access — a workspace path would only imply a capability
+ *     it does not have.
  */
-
-export interface LocalServerConfigInput {
-  /** API base URL the Local MCP should call. */
-  apiUrl: string;
-  /** Name of the environment variable holding the token, e.g. `LOCALEHUB_TOKEN`. */
-  tokenEnv?: string;
-  /** Absolute path to `apps/mcp-local/dist/bin.js`. Left as a placeholder when unknown. */
-  binPath?: string;
-}
 
 export interface RemoteServerConfigInput {
   /** Externally reachable Streamable HTTP endpoint, e.g. `https://localehub.example/mcp`. */
@@ -27,37 +19,17 @@ export interface RemoteServerConfigInput {
   tokenEnv?: string;
 }
 
-export type McpServerEntry =
-  | {
-      command: string;
-      args: string[];
-      env: Record<string, string>;
-    }
-  | {
-      type: 'http';
-      url: string;
-      headers: Record<string, string>;
-    };
+export type McpServerEntry = {
+  type: 'http';
+  url: string;
+  headers: Record<string, string>;
+};
 
 export interface McpClientConfig {
   mcpServers: Record<string, McpServerEntry>;
 }
 
 const DEFAULT_TOKEN_ENV = 'LOCALEHUB_TOKEN';
-const LOCAL_BIN_PLACEHOLDER = '<path-to-localehub>/apps/mcp-local/dist/bin.js';
-
-export function localServerConfig(input: LocalServerConfigInput): McpServerEntry {
-  const tokenEnv = input.tokenEnv || DEFAULT_TOKEN_ENV;
-  return {
-    command: 'node',
-    args: [input.binPath ?? LOCAL_BIN_PLACEHOLDER, '--stdio', '--workspace', '.'],
-    env: {
-      LOCALEHUB_API_URL: input.apiUrl,
-      LOCALEHUB_WORKSPACE: '.',
-      LOCALEHUB_TOKEN: `\${${tokenEnv}}`,
-    },
-  };
-}
 
 export function remoteServerConfig(input: RemoteServerConfigInput): McpServerEntry {
   const tokenEnv = input.tokenEnv || DEFAULT_TOKEN_ENV;
@@ -68,14 +40,8 @@ export function remoteServerConfig(input: RemoteServerConfigInput): McpServerEnt
   };
 }
 
-export function mcpClientConfig(input: {
-  local?: LocalServerConfigInput | null;
-  remote?: RemoteServerConfigInput | null;
-}): McpClientConfig {
-  const mcpServers: Record<string, McpServerEntry> = {};
-  if (input.local) mcpServers['localehub-local'] = localServerConfig(input.local);
-  if (input.remote) mcpServers['localehub-remote'] = remoteServerConfig(input.remote);
-  return { mcpServers };
+export function mcpClientConfig(input: { remote: RemoteServerConfigInput }): McpClientConfig {
+  return { mcpServers: { 'localehub-remote': remoteServerConfig(input.remote) } };
 }
 
 /** Pretty JSON with a trailing newline, ready to paste into `.mcp.json`. */

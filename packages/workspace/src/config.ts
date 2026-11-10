@@ -88,7 +88,7 @@ export function resolveToken(config: LocalConfig, env: NodeJS.ProcessEnv = proce
   if (!token) {
     throw new LocaleHubError(
       ErrorCode.INVALID_TOKEN,
-      `Environment variable ${name} is empty. Export your LocaleHub token before running the Local MCP.`,
+      `Environment variable ${name} is empty. Export your LocaleHub token before running the CLI.`,
       401,
       { envVar: name },
     );

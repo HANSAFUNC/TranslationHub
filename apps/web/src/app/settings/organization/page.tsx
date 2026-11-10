@@ -140,7 +140,7 @@ export default function OrganizationSettingsPage() {
               <FieldContent>
                 <FieldLabel htmlFor="allow-draft-apply">允许回写未审核草稿（include_drafts）</FieldLabel>
                 <FieldDescription>
-                  关闭时（默认），Local MCP 的 <span className="font-mono">pull_platform_updates</span> 与{' '}
+                  关闭时（默认），CLI 的 <span className="font-mono">localehub pull</span> 与{' '}
                   <span className="font-mono">preview_apply</span> 请求草稿会被平台拒绝，仓库里只会出现已审核（APPROVED）译文。
                 </FieldDescription>
               </FieldContent>
@@ -174,7 +174,7 @@ export default function OrganizationSettingsPage() {
             <ShieldCheck className="size-4" />
             权限模型
           </CardTitle>
-          <CardDescription>所有校验在服务端完成：REST API、Remote MCP、Local MCP 与 Web UI 共用同一套判断</CardDescription>
+          <CardDescription>所有校验在服务端完成：REST API、Remote MCP、CLI 与 Web UI 共用同一套判断</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <Table>

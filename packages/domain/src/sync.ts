@@ -632,7 +632,7 @@ export class SyncService {
             basedOnSourceVersionId: sourceVersionId,
             authorId: actor.userId,
             authorType: actor.actorType === 'mcp' ? 'mcp' : 'repository',
-            comment: 'Imported from repository via Local MCP',
+            comment: 'Imported from repository via CLI',
             repositoryApplied: true,
           });
 
@@ -1566,7 +1566,7 @@ export class SyncService {
     });
   }
 
-  /** Preview used by Local MCP before writing anything into the repository. */
+  /** Preview used by the CLI before writing anything into the repository. */
   computeLocalDiff(entry: {
     local: LocalEntrySnapshot | null;
     remote: RemoteEntrySnapshot | null;

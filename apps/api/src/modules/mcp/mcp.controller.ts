@@ -1,14 +1,29 @@
 import { Controller, Get } from '@nestjs/common';
-import { claudeCliCommand, formatMcpClientConfig, mcpClientConfig, mcpToolJsonSchemas } from '@localehub/contracts';
+import {
+  REMOTE_MCP_PROMPTS,
+  REMOTE_MCP_RESOURCES,
+  SKILLS_INDEX_URI,
+  SKILL_PROMPT_PREFIX,
+  SKILL_RESOURCE_TEMPLATE,
+  claudeCliCommand,
+  formatMcpClientConfig,
+  mcpClientConfig,
+  mcpToolJsonSchemas,
+} from '@localehub/contracts';
 import { Public } from '../../common/auth';
-import { LOCAL_TOOL_DESCRIPTIONS, REMOTE_TOOL_DESCRIPTIONS } from './tool-descriptions';
+import { REMOTE_TOOL_DESCRIPTIONS } from './tool-descriptions';
 
 /**
- * Machine readable MCP tool discovery.
+ * Machine readable MCP discovery.
  *
  * The Remote MCP binary serves the same registry over the real MCP transport; this endpoint
  * exists so the web UI, the CLI and the docs can render tool schemas without speaking MCP.
- * It contains no secrets and grants no local filesystem capability.
+ * It contains no secrets and grants no filesystem capability.
+ *
+ * The resources and prompts listed here are the ones the server actually registers, taken from
+ * the same constants it registers them under. An earlier version of this endpoint advertised a
+ * flat list that included resources no server implemented and prompts belonging to a second,
+ * now-removed local server — a discovery endpoint that overstates a capability is worse than none.
  */
 @Controller('mcp')
 export class McpController {
@@ -17,21 +32,27 @@ export class McpController {
   tools() {
     const schemas = mcpToolJsonSchemas();
     const remoteUrl = process.env.MCP_PUBLIC_URL || 'http://localhost:3003/mcp';
-    // The Local MCP runs on a developer machine, so it needs an address that resolves from there
-    // — the deployment's own API URL, not the browser's origin.
-    const apiUrl = process.env.API_BASE_URL || 'http://localhost:3001/api/v1';
     return {
-      local: schemas.local.map((tool) => ({ ...tool, description: LOCAL_TOOL_DESCRIPTIONS[tool.name] ?? '' })),
       remote: schemas.remote.map((tool) => ({ ...tool, description: REMOTE_TOOL_DESCRIPTIONS[tool.name] ?? '' })),
       resources: [
-        'localehub://projects/{projectId}',
-        'localehub://projects/{projectId}/locales',
-        'localehub://projects/{projectId}/glossary',
-        'localehub://projects/{projectId}/style-guide',
-        'localehub://projects/{projectId}/qa-rules',
-        'localehub://projects/{projectId}/sync-status',
+        ...REMOTE_MCP_RESOURCES,
+        // Skill delivery: the index, plus one resource per published skill behind the template.
+        SKILLS_INDEX_URI,
+        SKILL_RESOURCE_TEMPLATE,
       ],
-      prompts: ['sync-localization-project', 'review-localization-changes', 'fix-translation-issues', 'prepare-localization-release'],
+      prompts: [
+        ...REMOTE_MCP_PROMPTS,
+        // Plus one per PUBLISHED, PROMPT-kind skill, named `skill-<slug>`.
+      ],
+      // How a client reads and invokes skills. Served rather than hard-coded in the UI for the
+      // same reason as the snippets below: `@localehub/contracts` reaches node:crypto, so the web
+      // bundle cannot import the constants, and a second copy of the URI format in the browser is
+      // how the two would drift apart.
+      skillDelivery: {
+        indexUri: SKILLS_INDEX_URI,
+        resourceTemplate: SKILL_RESOURCE_TEMPLATE,
+        promptPrefix: SKILL_PROMPT_PREFIX,
+      },
       // What a client should connect to. Not a secret, and the UI cannot guess it: behind nginx
       // this is the public host, in development it is :3003.
       remoteUrl,
@@ -39,10 +60,7 @@ export class McpController {
       // @localehub/contracts (it reaches node:crypto), and duplicating the snippet logic in the
       // browser is how the two would drift apart.
       snippets: {
-        remoteOnly: formatMcpClientConfig(mcpClientConfig({ remote: { url: remoteUrl } })),
-        localAndRemote: formatMcpClientConfig(
-          mcpClientConfig({ local: { apiUrl }, remote: { url: remoteUrl } }),
-        ),
+        remote: formatMcpClientConfig(mcpClientConfig({ remote: { url: remoteUrl } })),
         claudeCli: claudeCliCommand({ url: remoteUrl }),
       },
     };

@@ -68,7 +68,7 @@ export default function AllTranslationsPage() {
             <EmptyState
               icon={<Boxes />}
               title="还没有项目"
-              description="创建项目后，用 Local MCP 把仓库里的语言文件推送上来。"
+              description="创建项目后，在仓库里运行 localehub scan 与 sync push 把语言文件推上来。"
               action={
                 <Button asChild>
                   <Link href="/projects">创建项目</Link>

@@ -20,7 +20,7 @@ export interface ConflictResolutionOutcome {
 
 /**
  * Spec §7.3 — conflict resolution never rewrites history, it produces a new version
- * and a new baseline. This helper keeps Local MCP and the platform UI consistent.
+ * and a new baseline. This helper keeps the CLI and the platform UI consistent.
  */
 export function resolveConflictValue(diff: SyncDiff, input: ConflictResolutionInput): ConflictResolutionOutcome {
   switch (input.resolution) {

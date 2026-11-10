@@ -35,10 +35,10 @@
 
 ### 2.1 两种凭据
 
-| 凭据         | 使用者                               | 传递方式                                                               | 附加要求                                                                      |
-| ------------ | ------------------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| 会话 Cookie  | 浏览器（Web 后台）                   | `localehub_session`，HttpOnly + SameSite=Lax，`credentials: 'include'` | 写请求必须带 `X-CSRF-Token`，其值等于可读的 `localehub_csrf` Cookie（双提交） |
-| Bearer Token | CLI、Local MCP、Remote MCP、集成脚本 | `Authorization: Bearer <lh_mcp_… \| lh_api_… \| 会话 JWT>`             | 无（凭据由调用方主动附加）                                                    |
+| 凭据         | 使用者                    | 传递方式                                                               | 附加要求                                                                      |
+| ------------ | ------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| 会话 Cookie  | 浏览器（Web 后台）        | `localehub_session`，HttpOnly + SameSite=Lax，`credentials: 'include'` | 写请求必须带 `X-CSRF-Token`，其值等于可读的 `localehub_csrf` Cookie（双提交） |
+| Bearer Token | CLI、Remote MCP、集成脚本 | `Authorization: Bearer <lh_mcp_… \| lh_api_… \| 会话 JWT>`             | 无（凭据由调用方主动附加）                                                    |
 
 浏览器不再把任何凭据放进 `localStorage`。Cookie 凭据是浏览器自动附带的，因此写请求（POST / PUT /
 PATCH / DELETE）额外做两层校验：`Origin`/`Referer` 必须属于本部署（`CORS_ORIGINS`，未配置时默认
@@ -130,7 +130,7 @@ POST /api/v1/sync/push
 Idempotency-Key: repo-commit-a1b2-plan-xyz
 
 { "syncPlanId": "plan_uuid", "planHash": "sha256:…", "confirmed": true,
-  "client": { "name": "localehub-local-mcp", "version": "0.1.0", "gitBranch": "feature/l10n", "gitCommit": "a1b2c3d4" } }
+  "client": { "name": "localehub-cli", "version": "0.1.0", "gitBranch": "feature/l10n", "gitCommit": "a1b2c3d4" } }
 ```
 
 服务端会重新校验计划哈希、过期时间、`baseRevision == 当前 project.revision`，
@@ -157,7 +157,7 @@ Idempotency-Key: repo-commit-a1b2-plan-xyz
 | GET      | `/projects/:projectId/translation-memory?query=` | 翻译记忆检索                        |
 | GET/POST | `/mcp-tokens`                                    | 列出 / 签发 Token（明文仅返回一次） |
 | DELETE   | `/mcp-tokens/:id`                                | 撤销                                |
-| GET      | `/mcp/token-info`                                | Token 自检（Local MCP 启动校验）    |
+| GET      | `/mcp/token-info`                                | Token 自检（CLI 启动校验）          |
 | GET      | `/mcp/scopes`                                    | Scope 清单                          |
 | GET/POST | `/skills`                                        | Skill 注册表                        |
 | GET/POST | `/projects/:projectId/releases`                  | 发布与快照                          |

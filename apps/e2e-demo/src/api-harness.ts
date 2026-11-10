@@ -111,3 +111,53 @@ export async function ensureApi(baseUrl: string, options: EnsureApiOptions): Pro
 
   return { baseUrl, spawned: true, stop };
 }
+
+/**
+ * Start the Remote MCP on its own port and wait for `/health`.
+ *
+ * It is a separate process for the same reason the API is: Streamable HTTP is what a client
+ * actually talks to, and the in-memory transport the unit tests use cannot show a registration
+ * that only breaks over the wire.
+ */
+export async function ensureRemoteMcp(port: number, options: { root: string; timeoutMs?: number }): Promise<ApiHandle> {
+  const baseUrl = `http://127.0.0.1:${port}`;
+  if (await apiReachable(baseUrl)) {
+    throw new Error(`port ${port} is already serving something; refusing to test against a process this suite did not start`);
+  }
+
+  const entry = join(options.root, 'apps/mcp-remote/dist/main.js');
+  if (!existsSync(entry)) {
+    throw new Error(`Remote MCP is not built: ${entry} is missing. Run \`pnpm -r build\` first.`);
+  }
+
+  const child = spawn('node', [entry], {
+    cwd: options.root,
+    env: { ...process.env, MCP_REMOTE_PORT: String(port), MCP_REMOTE_ENABLED: 'true' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  const collect = (chunk: Buffer): void => {
+    output = `${output}${chunk.toString()}`.slice(-4_000);
+  };
+  child.stdout?.on('data', collect);
+  child.stderr?.on('data', collect);
+
+  const exited = new Promise<void>((resolveExit) => child.once('exit', () => resolveExit()));
+  const stop = async (): Promise<void> => {
+    if (child.exitCode !== null) return;
+    child.kill('SIGTERM');
+    const escalate = setTimeout(() => {
+      if (child.exitCode === null) child.kill('SIGKILL');
+    }, 5_000);
+    escalate.unref();
+    await exited;
+    clearTimeout(escalate);
+  };
+
+  if (!(await waitForApi(baseUrl, options.timeoutMs ?? 30_000))) {
+    await stop();
+    const detail = output.trim() ? `\n--- Remote MCP output ---\n${output.trim()}` : '';
+    throw new Error(`Remote MCP did not become healthy at ${baseUrl} within the timeout.${detail}`);
+  }
+  return { baseUrl, spawned: true, stop };
+}

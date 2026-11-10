@@ -29,37 +29,51 @@ import { executeApply, planApply, toApplyReportPayload } from './apply';
 import { scanAndCollect, type ScanSummary } from './scan';
 import { StateStore } from './state';
 
-export interface ToolContext {
+export interface ServiceContext {
   cwd: string;
   env: NodeJS.ProcessEnv;
 }
 
-export interface ToolResult {
+/** JSON-shaped result of one operation. The CLI prints it; nothing here speaks a wire protocol. */
+export interface OperationResult {
   [key: string]: unknown;
 }
 
 /**
- * Local MCP tool implementations.
+ * Local repository operations, as driven by the CLI.
  *
- * Every tool that touches the network or the filesystem goes through:
+ * Every operation that touches the network or the filesystem goes through:
  *   - WorkspaceGuard (path allowlists, symlink checks)
  *   - SafeFileWriter (backup + atomic write + re-parse)
  *   - the platform API (single source of business truth)
- * No tool commits or pushes git on its own.
+ * Nothing here commits or pushes git on its own.
+ *
+ * The class is deliberately transport-free. It used to back a stdio MCP server as well; that
+ * server is gone (the platform exposes one MCP, on the platform side), and this engine is what
+ * `localehub scan / sync / apply` runs on.
  */
-export class LocalMcpServices {
+export class LocalSyncServices {
   private loaded: LoadedConfig | null = null;
   private guard: WorkspaceGuard | null = null;
   private api: ApiClient | null = null;
   private state: StateStore | null = null;
   private lastScan: { result: ScanResult; summary: ScanSummary; payload: { projectId: string; scanId: string } } | null = null;
 
-  constructor(private readonly context: ToolContext = { cwd: process.cwd(), env: process.env }) {}
+  constructor(private readonly context: ServiceContext = { cwd: process.cwd(), env: process.env }) {}
 
   /* -------------------------------------------------------------- bootstrap */
 
   config(): LoadedConfig {
-    if (!this.loaded) this.loaded = loadLocalConfig(this.context.cwd);
+    if (!this.loaded) {
+      this.loaded = loadLocalConfig(this.context.cwd);
+      // `LOCALEHUB_API_URL` is documented as overriding the config file (docs/MCP.md). It used to
+      // be applied by the stdio entry point on its *own* copy of LoadedConfig, which the services
+      // never read — they load their own — so the override was silently dropped and every caller
+      // talked to the config file's address regardless. Applied here, where the config is read,
+      // it holds for the CLI and the MCP server alike.
+      const override = this.context.env.LOCALEHUB_API_URL;
+      if (override) this.loaded.config.localehub.apiUrl = override;
+    }
     return this.loaded;
   }
 
@@ -84,7 +98,7 @@ export class LocalMcpServices {
       this.api = new ApiClient({
         baseUrl: config.localehub.apiUrl.replace(/\/api\/v1$/, '') + '/api/v1',
         token,
-        clientName: 'localehub-local-mcp',
+        clientName: 'localehub-cli',
         clientVersion: '0.1.0',
       });
     }
@@ -99,7 +113,7 @@ export class LocalMcpServices {
     const git = this.git();
     const info = git.info();
     return {
-      name: 'localehub-local-mcp',
+      name: 'localehub-cli',
       version: '0.1.0',
       ...(info.branch ? { gitBranch: info.branch } : {}),
       ...(info.commit ? { gitCommit: info.commit } : {}),
@@ -108,7 +122,7 @@ export class LocalMcpServices {
 
   /* --------------------------------------------------- get_local_project_info */
 
-  async getLocalProjectInfo(): Promise<ToolResult> {
+  async getLocalProjectInfo(): Promise<OperationResult> {
     const loaded = this.config();
     const guard = this.workspace();
     const git = this.git();
@@ -162,7 +176,7 @@ export class LocalMcpServices {
 
   /* ------------------------------------------------------ scan_local_project */
 
-  async scanLocalProject(input: { project_id?: string; file_set_ids?: string[] } = {}): Promise<ToolResult> {
+  async scanLocalProject(input: { project_id?: string; file_set_ids?: string[] } = {}): Promise<OperationResult> {
     const projectId = this.projectId(input.project_id);
     const guard = this.workspace();
     const scanId = `scan_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -181,7 +195,12 @@ export class LocalMcpServices {
     try {
       const response = await this.client().uploadScan(payload);
       uploaded = { connectionId: response.connectionId };
-      this.store().patch({ projectId, connectionId: response.connectionId, lastScanId: scanId, lastScanAt: new Date().toISOString() });
+      this.store().patch({
+        projectId,
+        connectionId: response.connectionId,
+        lastScanId: scanId,
+        lastScanAt: new Date().toISOString(),
+      });
     } catch (error) {
       uploadError = error instanceof Error ? error.message : String(error);
     }
@@ -207,7 +226,7 @@ export class LocalMcpServices {
    * Read source files for context. Strictly read-only, restricted to `workspace.allowRead`,
    * and never uploaded anywhere by this call (spec §0.3: code context is read on demand).
    */
-  async readProjectContext(input: { glob: string; max_files: number; max_bytes_per_file: number }): Promise<ToolResult> {
+  async readProjectContext(input: { glob: string; max_files: number; max_bytes_per_file: number }): Promise<OperationResult> {
     const guard = this.workspace();
     const matcher = globToRegExp(input.glob);
     const candidates = walkWorkspace(guard.root).filter((file) => matcher.test(file));
@@ -238,7 +257,7 @@ export class LocalMcpServices {
 
   /* -------------------------------------------------------- get_remote_project */
 
-  async getRemoteProject(input: { project_id?: string } = {}): Promise<ToolResult> {
+  async getRemoteProject(input: { project_id?: string } = {}): Promise<OperationResult> {
     const projectId = this.projectId(input.project_id);
     const [project, status] = await Promise.all([this.client().getProject(projectId), this.client().syncStatus(projectId)]);
     return { project, syncStatus: status };
@@ -254,7 +273,7 @@ export class LocalMcpServices {
     include_drafts?: boolean;
     file_set_ids?: string[];
     locales?: string[];
-  }): Promise<ToolResult> {
+  }): Promise<OperationResult> {
     const projectId = this.projectId(input.project_id);
     const scanId = input.scan_id ?? this.lastScan?.summary.scanId ?? this.store().get().lastScanId;
     if (!scanId) {
@@ -326,7 +345,13 @@ export class LocalMcpServices {
 
   /* ---------------------------------------------------- push_project_changes */
 
-  async pushProjectChanges(input: { preview_id?: string; sync_plan_id?: string; confirm?: boolean; idempotency_key?: string; include_deletes?: boolean }): Promise<ToolResult> {
+  async pushProjectChanges(input: {
+    preview_id?: string;
+    sync_plan_id?: string;
+    confirm?: boolean;
+    idempotency_key?: string;
+    include_deletes?: boolean;
+  }): Promise<OperationResult> {
     const state = this.store().get();
     const preview = state.lastPreview;
     const planId = input.sync_plan_id ?? input.preview_id ?? preview?.syncPlanId;
@@ -382,16 +407,20 @@ export class LocalMcpServices {
 
   /* ------------------------------------------------- pull_platform_updates */
 
-  async pullPlatformUpdates(input: {
-    project_id?: string;
-    locales?: string[];
-    statuses?: string[];
-    since_revision?: string | number;
-    include_drafts?: boolean;
-    limit?: number;
-  } = {}): Promise<ToolResult> {
+  async pullPlatformUpdates(
+    input: {
+      project_id?: string;
+      locales?: string[];
+      statuses?: string[];
+      since_revision?: string | number;
+      include_drafts?: boolean;
+      limit?: number;
+    } = {},
+  ): Promise<OperationResult> {
     const projectId = this.projectId(input.project_id);
-    const statuses = input.include_drafts ? [...(input.statuses ?? ['APPROVED']), 'DRAFT', 'PENDING_REVIEW'] : input.statuses ?? ['APPROVED'];
+    const statuses = input.include_drafts
+      ? [...(input.statuses ?? ['APPROVED']), 'DRAFT', 'PENDING_REVIEW']
+      : (input.statuses ?? ['APPROVED']);
     // Default window = everything the platform recorded after our last successful push/apply.
     // Passing an explicit since_revision always wins (recovery from a missed event).
     const sinceRevision =
@@ -432,7 +461,15 @@ export class LocalMcpServices {
 
   /* ------------------------------------------------------------- preview_apply */
 
-  async previewApply(input: { project_id?: string; change_ids?: string[]; dry_run?: boolean; create_backup?: boolean; include_drafts?: boolean } = {}): Promise<ToolResult> {
+  async previewApply(
+    input: {
+      project_id?: string;
+      change_ids?: string[];
+      dry_run?: boolean;
+      create_backup?: boolean;
+      include_drafts?: boolean;
+    } = {},
+  ): Promise<OperationResult> {
     const projectId = this.projectId(input.project_id);
     const guard = this.workspace();
     const config = this.config().config;
@@ -444,7 +481,9 @@ export class LocalMcpServices {
     });
     // A change that is already in the repository must not be offered again.
     const pending = changes.filter((change) => !change.appliedToRepo);
-    const selected = input.change_ids?.length ? pending.filter((change) => input.change_ids!.includes(changeKeyId(change))) : pending;
+    const selected = input.change_ids?.length
+      ? pending.filter((change) => input.change_ids!.includes(changeKeyId(change)))
+      : pending;
 
     const scan = await scanWorkspace(guard, { projectId, sourceLocale: config.project.sourceLocale });
     const plan = planApply({
@@ -490,14 +529,27 @@ export class LocalMcpServices {
 
   /* ------------------------------------------- apply_translation_updates */
 
-  async applyTranslationUpdates(input: { apply_plan_id: string; confirm?: boolean; require_clean_worktree?: boolean; create_backup?: boolean }): Promise<ToolResult> {
+  async applyTranslationUpdates(input: {
+    apply_plan_id: string;
+    confirm?: boolean;
+    require_clean_worktree?: boolean;
+    create_backup?: boolean;
+  }): Promise<OperationResult> {
     const store = this.store();
     const plan: ApplyPlan | null = store.getApplyPlan(input.apply_plan_id);
     if (!plan) {
-      throw new LocaleHubError(ErrorCode.SYNC_PLAN_NOT_FOUND, `Unknown apply plan ${input.apply_plan_id}. Call preview_apply first.`, 404);
+      throw new LocaleHubError(
+        ErrorCode.SYNC_PLAN_NOT_FOUND,
+        `Unknown apply plan ${input.apply_plan_id}. Call preview_apply first.`,
+        404,
+      );
     }
     if (new Date(plan.expiresAt).getTime() <= Date.now()) {
-      throw new LocaleHubError(ErrorCode.SYNC_PLAN_EXPIRED, `Apply plan expired at ${plan.expiresAt}. Re-run preview_apply.`, 409);
+      throw new LocaleHubError(
+        ErrorCode.SYNC_PLAN_EXPIRED,
+        `Apply plan expired at ${plan.expiresAt}. Re-run preview_apply.`,
+        409,
+      );
     }
     if (!input.confirm) {
       return {
@@ -595,7 +647,9 @@ export class LocalMcpServices {
 
   /* ------------------------------------------- validate_localization_files */
 
-  async validateLocalizationFiles(input: { file_set_ids?: string[]; check_placeholders?: boolean; check_duplicates?: boolean; check_missing?: boolean } = {}): Promise<ToolResult> {
+  async validateLocalizationFiles(
+    input: { file_set_ids?: string[]; check_placeholders?: boolean; check_duplicates?: boolean; check_missing?: boolean } = {},
+  ): Promise<OperationResult> {
     const config = this.config().config;
     const guard = this.workspace();
     const scan = await scanWorkspace(guard, {
@@ -604,7 +658,14 @@ export class LocalMcpServices {
       fileSetIds: input.file_set_ids,
     });
 
-    const issues: { code: string; severity: 'ERROR' | 'WARNING' | 'INFO'; key?: string; locale?: string; filePath?: string; message: string }[] = [
+    const issues: {
+      code: string;
+      severity: 'ERROR' | 'WARNING' | 'INFO';
+      key?: string;
+      locale?: string;
+      filePath?: string;
+      message: string;
+    }[] = [
       ...scan.errors.map((error) => ({
         code: error.code,
         severity: 'ERROR' as const,
@@ -690,7 +751,7 @@ export class LocalMcpServices {
 
   /* --------------------------------------------------------- get_sync_status */
 
-  async getSyncStatus(input: { project_id?: string; include_conflicts?: boolean } = {}): Promise<ToolResult> {
+  async getSyncStatus(input: { project_id?: string; include_conflicts?: boolean } = {}): Promise<OperationResult> {
     const projectId = this.projectId(input.project_id);
     const state = this.store().get();
     const git = this.git().info();
@@ -739,9 +800,18 @@ export class LocalMcpServices {
 
   /* ---------------------------------------------------- resolve_sync_conflict */
 
-  async resolveSyncConflict(input: { conflict_id: string; resolution: ConflictResolution; value?: string; note?: string }): Promise<ToolResult> {
+  async resolveSyncConflict(input: {
+    conflict_id: string;
+    resolution: ConflictResolution;
+    value?: string;
+    note?: string;
+  }): Promise<OperationResult> {
     if (!input.resolution) {
-      throw new LocaleHubError(ErrorCode.VALIDATION_ERROR, 'resolution is required (KEEP_LOCAL | KEEP_REMOTE | MANUAL_MERGE | DEFER)', 422);
+      throw new LocaleHubError(
+        ErrorCode.VALIDATION_ERROR,
+        'resolution is required (KEEP_LOCAL | KEEP_REMOTE | MANUAL_MERGE | DEFER)',
+        422,
+      );
     }
     if (input.resolution === 'MANUAL_MERGE' && typeof input.value !== 'string') {
       throw new LocaleHubError(ErrorCode.VALIDATION_ERROR, 'MANUAL_MERGE requires an explicit value', 422);
@@ -763,12 +833,16 @@ export class LocalMcpServices {
 
   /* ------------------------------------------------------- report_apply_result */
 
-  async reportApplyResult(input: { apply_plan_id: string; git_commit?: string | null; note?: string }): Promise<ToolResult> {
+  async reportApplyResult(input: { apply_plan_id: string; git_commit?: string | null; note?: string }): Promise<OperationResult> {
     const state = this.store().get();
     const lastReport = state.lastApplyReport;
     const sessionId = state.lastPreview?.sessionId;
     if (!sessionId) {
-      throw new LocaleHubError(ErrorCode.SYNC_SESSION_NOT_FOUND, 'No sync session recorded locally. Run preview_sync first.', 404);
+      throw new LocaleHubError(
+        ErrorCode.SYNC_SESSION_NOT_FOUND,
+        'No sync session recorded locally. Run preview_sync first.',
+        404,
+      );
     }
     if (!lastReport || lastReport.applyPlanId !== input.apply_plan_id) {
       throw new LocaleHubError(
@@ -793,10 +867,14 @@ export class LocalMcpServices {
 
   /* ----------------------------------------------------------- create_git_patch */
 
-  createGitPatch(input: { apply_plan_id?: string; output_path?: string; include_untracked?: boolean } = {}): ToolResult {
+  createGitPatch(input: { apply_plan_id?: string; output_path?: string; include_untracked?: boolean } = {}): OperationResult {
     const git = this.git();
     if (!git.isRepository()) {
-      throw new LocaleHubError(ErrorCode.VALIDATION_ERROR, 'The workspace is not a git repository, so no patch can be produced.', 400);
+      throw new LocaleHubError(
+        ErrorCode.VALIDATION_ERROR,
+        'The workspace is not a git repository, so no patch can be produced.',
+        400,
+      );
     }
     const diff = git.diff();
     const stat = git.diffStat();
@@ -810,7 +888,10 @@ export class LocalMcpServices {
       committed: false,
       pushed: false,
       filesChanged: git.info().changedFiles,
-      note: input.include_untracked === false ? 'Untracked files are not included in `git diff`.' : 'Patch written but nothing committed or pushed.',
+      note:
+        input.include_untracked === false
+          ? 'Untracked files are not included in `git diff`.'
+          : 'Patch written but nothing committed or pushed.',
     };
   }
 

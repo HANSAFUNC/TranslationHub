@@ -57,7 +57,7 @@ pnpm --filter @localehub/web build
 | `/projects` | 项目列表与新建 |
 | `/projects/[id]` | 项目概览：语言、平台、仓库连接、状态分布 |
 | `/projects/[id]/translations` | 翻译编辑器：原文/译文并排、上下文、版本历史、QA、草稿与审核 |
-| `/projects/[id]/sync` | 仓库连接、心跳、文件映射、同步历史、冲突入口、Local MCP 操作说明 |
+| `/projects/[id]/sync` | 仓库连接、心跳、文件映射、同步历史、冲突入口、CLI 操作说明 |
 | `/translations`、`/review`、`/qa` | 全局入口（选择项目后进入） |
 | `/sync`、`/sync/sessions`、`/sync/conflicts` | 同步总览、历史会话、三栏冲突处理 |
 | `/developers/tokens` | API / MCP Token 签发与撤销、`.mcp.json` 示例 |
@@ -65,4 +65,4 @@ pnpm --filter @localehub/web build
 | `/settings/organization` | 账号、组织、权限模型说明 |
 
 仓库同步页**不会**伪造平台能直接访问开发者机器：所有 scan/push/pull/apply 都明确说明需要
-在本地由 Local MCP 执行。
+在本地由 CLI 执行。

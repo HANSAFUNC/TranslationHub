@@ -1,15 +1,15 @@
 # LocaleHub
 
 面向开发团队、产品经理、翻译与审核人员的**多语言管理平台**，核心能力是
-**代码仓库 ↔ 平台之间的双向本地化同步闭环**，通过 MCP（Model Context Protocol）把
-本地仓库安全地接入平台。
+**代码仓库 ↔ 平台之间的双向本地化同步闭环**：平台侧通过 MCP（Model Context Protocol）
+暴露一个 Remote MCP，本地仓库侧通过 CLI 做扫描与安全写回。
 
 ```text
 开发者本地仓库
   ├─ Web / iOS / Android 语言文件
   ├─ 可选代码上下文（只读白名单）
-  └─ Local MCP（stdio）
-          │ scan / preview / push / pull / 安全回写
+  └─ localehub CLI（scan / preview / push / pull / 安全回写）
+          │
           ▼
 LocaleHub API + Sync Engine  ──  PostgreSQL（组织级 RLS）/ Redis + BullMQ
   ├─ 项目、Key、Locale、术语、版本、审核、QA、发布快照
@@ -23,9 +23,9 @@ LocaleHub Web 平台
 
 ## 最重要的验收结果
 
-1. 开发者在本地仓库修改语言文件，Agent 通过 Local MCP 扫描、预览并推送到平台。
+1. 开发者在本地仓库修改语言文件，Agent 用 CLI 扫描、预览并推送到平台。
 2. 产品经理在平台修正错误译文并**审核通过**。
-3. Agent 通过 Local MCP 拉取变更、展示逐文件逐 Key 的 diff，用户确认后**安全写回**本地文件。
+3. Agent 拉取变更、展示逐文件逐 Key 的 diff，用户确认后**安全写回**本地文件。
 4. 三方基线比较保证：双边同时修改且内容不同时**报冲突，绝不静默覆盖**。
 5. 全过程可追溯、可重试、有备份、有 Git diff；默认**不自动 commit / push**。
 
@@ -71,15 +71,15 @@ node apps/e2e-demo/dist/run-demo.js
 
 脚本会自动创建一份 `demo-app` 的临时副本并依次验证：
 
-| 场景 | 验证内容                                                                                          |
-| ---- | ------------------------------------------------------------------------------------------------- |
-| A    | 扫描 → 预览 → 推送；重复推送幂等，不产生重复版本                                                  |
-| B    | 平台修正日语译文并审核 → Local MCP 拉取 → dry-run diff → 确认写回 → 校验 JSON/Key/占位符/Git diff |
-| C    | 再次同步结果为 `unchanged`，不产生新版本                                                          |
-| D    | 平台草稿默认不进入 pull/apply 列表；显式 `include_drafts` 才可见并附带风险提示                    |
-| E    | 源文变更后依赖旧 Source Version 的目标译文自动标记 `STALE`，历史保留                              |
+| 场景 | 验证内容                                                                                |
+| ---- | --------------------------------------------------------------------------------------- |
+| A    | 扫描 → 预览 → 推送；重复推送幂等，不产生重复版本                                        |
+| B    | 平台修正日语译文并审核 → 拉取 → dry-run diff → 确认写回 → 校验 JSON/Key/占位符/Git diff |
+| C    | 再次同步结果为 `unchanged`，不产生新版本                                                |
+| D    | 平台草稿默认不进入 pull/apply 列表；显式 `include_drafts` 才可见并附带风险提示          |
+| E    | 源文变更后依赖旧 Source Version 的目标译文自动标记 `STALE`，历史保留                    |
 
-## 接入真实仓库（Local MCP）
+## 接入真实仓库（CLI）
 
 ```bash
 # 1. 在仓库根目录生成配置
@@ -100,28 +100,7 @@ node apps/cli/dist/bin.js apply --confirm --apply-plan <id>
 
 ### Claude Code / Cursor / Codex 配置
 
-```json
-{
-  "mcpServers": {
-    "localehub-local": {
-      "command": "node",
-      "args": ["/abs/path/to/localehub/apps/mcp-local/dist/bin.js", "--stdio", "--workspace", "."],
-      "env": {
-        "LOCALEHUB_API_URL": "http://localhost:3001/api/v1",
-        "LOCALEHUB_WORKSPACE": ".",
-        "LOCALEHUB_TOKEN": "${LOCALEHUB_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-Local MCP 提供 14 个工具：`get_local_project_info`、`scan_local_project`、`read_project_context`、
-`get_remote_project`、`preview_sync`、`push_project_changes`、`pull_platform_updates`、
-`preview_apply`、`apply_translation_updates`、`validate_localization_files`、`get_sync_status`、
-`resolve_sync_conflict`、`report_apply_result`、`create_git_patch`。
-
-Remote MCP（平台侧，Streamable HTTP）提供 15 个平台工具，**不提供任何本地文件读写能力**：
+平台只有一个 MCP，跑在服务端，所以配置里只有一条远端条目 —— 不需要在仓库里装任何东西：
 
 ```json
 {
@@ -135,8 +114,14 @@ Remote MCP（平台侧，Streamable HTTP）提供 15 个平台工具，**不提�
 }
 ```
 
-`node apps/cli/dist/bin.js mcp-config --remote http://localhost:3003/mcp` 会同时生成 local 与 remote
-两段配置。详见 [docs/MCP.md](docs/MCP.md)。
+`node apps/cli/dist/bin.js mcp-config` 会打印上面这段（URL 由平台自己报告，也可以用
+`--remote` 显式指定）。它提供 15 个平台工具，**不提供任何本地文件读写能力**。
+
+读写仓库的 14 个动作在 CLI 里（上表那些命令），Agent 用 Bash 调用即可。这样做的好处是
+本地动作有明确的退出码、可以固定在 CI 里跑、受 `allowWrite` 白名单与备份/原子写保护，
+而平台侧永远够不到开发者的磁盘。
+
+详见 [docs/MCP.md](docs/MCP.md)。
 
 ## 工程结构
 
@@ -146,8 +131,7 @@ localehub/
 │   ├── api/          NestJS REST API（/api/v1）
 │   ├── web/          Next.js 15 + shadcn/ui 管理后台（Tailwind v4，new-york/zinc）
 │   ├── worker/       BullMQ Worker（QA、导入导出、通知）
-│   ├── mcp-local/    Local MCP（stdio，开发者机器）
-│   ├── mcp-remote/   Remote MCP（Streamable HTTP）
+│   ├── mcp-remote/   Remote MCP（Streamable HTTP，唯一的 MCP）
 │   ├── cli/          localehub CLI + seed
 │   └── e2e-demo/     端到端验收演示与集成测试
 ├── packages/
@@ -158,6 +142,7 @@ localehub/
 │   ├── format-adapters/ JSON / YAML / .strings / .stringsdict / .xcstrings / Android XML / PO / XLIFF
 │   ├── workspace/    本地文件访问边界、原子写入、Git 集成
 │   ├── api-client/   REST 客户端
+│   ├── local-sync/   本地仓库引擎（CLI 使用：扫描、三方比较、安全写回）
 │   ├── permissions/  角色与 MCP Scope 判定
 │   └── config/       环境变量与 Secret 加载
 ├── skills/           内置 Skill（prompt 型，权限不高于当前用户）

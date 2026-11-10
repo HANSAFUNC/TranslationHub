@@ -54,11 +54,11 @@ chmod 600 secrets/*
 这三项不是密钥，但**必须**按实际域名给值：生产 overlay 不提供本地默认值，否则页面会把
 `localhost` 当成真实地址发给客户端和开发者。
 
-| 变量              | 含义                                                     | 例                                |
-| ----------------- | -------------------------------------------------------- | --------------------------------- |
-| `MCP_PUBLIC_URL`  | Remote MCP 对外的完整地址，Web UI 与 CLI 都按它生成配置   | `https://localehub.example/mcp`   |
-| `API_BASE_URL`    | 平台 API 的对外地址，会写进 Local MCP 的配置片段         | `https://localehub.example/api/v1` |
-| `CORS_ORIGINS`    | 浏览器访问 Web 的 origin（同源部署就是它自己）           | `https://localehub.example`       |
+| 变量             | 含义                                                    | 例                                 |
+| ---------------- | ------------------------------------------------------- | ---------------------------------- |
+| `MCP_PUBLIC_URL` | Remote MCP 对外的完整地址，Web UI 与 CLI 都按它生成配置 | `https://localehub.example/mcp`    |
+| `API_BASE_URL`   | 平台 API 的对外地址，CLI 按它连接平台                   | `https://localehub.example/api/v1` |
+| `CORS_ORIGINS`   | 浏览器访问 Web 的 origin（同源部署就是它自己）          | `https://localehub.example`        |
 
 ```bash
 export MCP_PUBLIC_URL=https://localehub.example/mcp
@@ -87,14 +87,14 @@ docker compose logs -f api worker mcp-remote
 
 生产覆盖的关键差异：
 
-| 项 | 开发 | 生产 |
-|---|---|---|
-| 端口 | postgres/redis 暴露到宿主机 | 不暴露 |
-| Secret | `env.example` 明文示例 | `*_FILE` + docker secrets |
-| 副本 | 1 | api/web/worker 各 2 |
-| 资源限制 | 无 | 有 |
-| 只读根文件系统 | 否 | api 容器 `read_only` + tmpfs |
-| 入口 | 直连 | nginx（TLS / HSTS / 安全头） |
+| 项             | 开发                        | 生产                         |
+| -------------- | --------------------------- | ---------------------------- |
+| 端口           | postgres/redis 暴露到宿主机 | 不暴露                       |
+| Secret         | `env.example` 明文示例      | `*_FILE` + docker secrets    |
+| 副本           | 1                           | api/web/worker 各 2          |
+| 资源限制       | 无                          | 有                           |
+| 只读根文件系统 | 否                          | api 容器 `read_only` + tmpfs |
+| 入口           | 直连                        | nginx（TLS / HSTS / 安全头） |
 
 ### 2.4 备份与恢复
 
@@ -109,14 +109,14 @@ docker compose exec -T postgres pg_restore -U postgres -Cd localehub_test < back
 
 ## 3. 可观测性
 
-| 端点 / 来源 | 内容 |
-|---|---|
-| `GET /api/v1/health` | 服务与数据库状态 |
-| `GET /api/v1/health/ready` | 就绪探针 |
-| `GET /api/v1/system/queues` | 队列深度（BullMQ） |
-| 容器 healthcheck | api 用 Node fetch 探活；postgres/redis 用原生探针 |
-| 日志 | 结构化 stdout；含 `request_id`；不记录 Token/密钥/源码正文 |
-| 审计 | `audit_logs` 表：actor、action、resource、project、sync_session、mcp_client、耗时 |
+| 端点 / 来源                 | 内容                                                                              |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| `GET /api/v1/health`        | 服务与数据库状态                                                                  |
+| `GET /api/v1/health/ready`  | 就绪探针                                                                          |
+| `GET /api/v1/system/queues` | 队列深度（BullMQ）                                                                |
+| 容器 healthcheck            | api 用 Node fetch 探活；postgres/redis 用原生探针                                 |
+| 日志                        | 结构化 stdout；含 `request_id`；不记录 Token/密钥/源码正文                        |
+| 审计                        | `audit_logs` 表：actor、action、resource、project、sync_session、mcp_client、耗时 |
 
 需要关注的指标：同步会话失败/部分失败率、`REVISION_MISMATCH` 次数（预览过期频率）、
 冲突数量与解决时长、`APPLY_REJECTED_STALE_PREVIEW` 次数（本地并发编辑频率）、
@@ -134,17 +134,21 @@ docker compose -f compose.yaml -f compose.production.yaml up -d
 
 迁移只做向前兼容的增量变更（新增列可空、新增表）；破坏性变更需要单独发布并先备份。
 
-## 5. 私有化 Local MCP 容器（可选）
+## 5. CI Runner 里跑 CLI（可选）
 
-Local MCP 默认装在开发者机器。若必须在 CI Runner 内以容器运行：
+CLI 默认装在开发者机器。若必须在 CI Runner 内以容器运行：
 
 ```bash
 docker run --rm -i \
   --network host \
   -v "$PWD/repo":/workspace:rw \
+  -w /workspace \
   -e LOCALEHUB_TOKEN -e LOCALEHUB_WORKSPACE=/workspace \
-  localehub-api:latest node apps/mcp-local/dist/bin.js --stdio
+  localehub-api:latest node apps/cli/dist/bin.js scan
 ```
+
+把 `scan` 换成 `sync preview` / `sync push --confirm` / `apply --confirm` / `qa` 等即可；
+退出码 0 表示通过、2 表示用法错误、3 表示冲突或被阻断的写回（见 `localehub --help`）。
 
 **禁止**挂载 `/`、`$HOME` 或 `/var/run/docker.sock`；`-v` 只能指向具体仓库目录。
 

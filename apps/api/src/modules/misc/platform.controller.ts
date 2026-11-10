@@ -1,5 +1,14 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { ErrorCode, LocaleHubError, Role, canonicalizeLocaleTag, formatIdSchema, localeTagSchema } from '@localehub/contracts';
+import {
+  ErrorCode,
+  LocaleHubError,
+  Role,
+  REMOTE_MCP_PROMPTS,
+  canonicalizeLocaleTag,
+  formatIdSchema,
+  localeTagSchema,
+  selectDeliverableSkills,
+} from '@localehub/contracts';
 import { z } from 'zod';
 import { assertRole, type ActorContext } from '@localehub/permissions';
 import { createAdapter } from '@localehub/format-adapters';
@@ -42,14 +51,32 @@ export class PlatformController {
 
   /* ------------------------------------------------------------------ skills */
 
+  /**
+   * Every registered skill, annotated with what a client can actually reach.
+   *
+   * The table lists all versions and statuses (that is what a registry page is for), but MCP only
+   * ever delivers one entry per slug — the highest PUBLISHED version — and only PROMPT-kind skills
+   * become invocable prompts. Computing that here, with the same `selectDeliverableSkills` the two
+   * MCP servers use, is what keeps this page from advertising a handle that no server registers.
+   */
   @Get('skills')
   async listSkills(@Actor() actor: ActorContext) {
-    return this.prisma.tenant.withOrganization(actor.organizationId, (tx) =>
+    const rows = await this.prisma.tenant.withOrganization(actor.organizationId, (tx) =>
       tx.skill.findMany({
         where: { OR: [{ organizationId: actor.organizationId }, { organizationId: null }] },
         orderBy: [{ slug: 'asc' }, { version: 'desc' }],
       }),
     );
+    const delivered = new Map(
+      selectDeliverableSkills(rows, { reservedPromptNames: REMOTE_MCP_PROMPTS }).map((skill) => [skill.slug, skill]),
+    );
+    return rows.map((row) => {
+      const served = delivered.get(row.slug);
+      return {
+        ...row,
+        mcp: served && served.version === row.version ? { resourceUri: served.resourceUri, promptName: served.promptName } : null,
+      };
+    });
   }
 
   @Post('skills')
@@ -98,7 +125,11 @@ export class PlatformController {
 
   @Post('projects/:projectId/releases')
   @RequireRole(Role.PROJECT_MANAGER)
-  async createRelease(@Actor() actor: ActorContext, @Param('projectId') projectId: string, @Body(zodBody(releaseSchema)) body: z.infer<typeof releaseSchema>) {
+  async createRelease(
+    @Actor() actor: ActorContext,
+    @Param('projectId') projectId: string,
+    @Body(zodBody(releaseSchema)) body: z.infer<typeof releaseSchema>,
+  ) {
     assertRole(actor, projectId, Role.PROJECT_MANAGER);
     return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
       const entries = await tx.translationEntry.findMany({
@@ -162,7 +193,11 @@ export class PlatformController {
           projectId,
           localeCode: query.locale,
           status: 'APPROVED',
-          key: { platform: query.platform, archivedAt: null, ...(query.namespace ? { namespace: { name: query.namespace } } : {}) },
+          key: {
+            platform: query.platform,
+            archivedAt: null,
+            ...(query.namespace ? { namespace: { name: query.namespace } } : {}),
+          },
         },
         include: { key: { include: { namespace: true } } },
       }),
@@ -188,7 +223,11 @@ export class PlatformController {
 
   @Post('projects/:projectId/qa/run-async')
   @RequireRole(Role.TRANSLATOR)
-  async runQaAsync(@Actor() actor: ActorContext, @Param('projectId') projectId: string, @Body(zodBody(z.object({ locale: localeTagSchema.optional() }))) body: { locale?: string }) {
+  async runQaAsync(
+    @Actor() actor: ActorContext,
+    @Param('projectId') projectId: string,
+    @Body(zodBody(z.object({ locale: localeTagSchema.optional() }))) body: { locale?: string },
+  ) {
     assertRole(actor, projectId, Role.TRANSLATOR);
     return this.queue.enqueue(
       QUEUE_NAMES.QA,

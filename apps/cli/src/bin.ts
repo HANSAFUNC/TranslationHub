@@ -3,17 +3,14 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { stringify as toYaml } from 'yaml';
 import { loadEnvFiles } from '@localehub/config';
-import { LocalMcpServices } from '@localehub/mcp-local';
+import { LocalSyncServices } from '@localehub/local-sync';
 import { loadLocalConfig } from '@localehub/workspace';
 import { flagBool, parseArgs } from './args';
-
-/** Repository root: `dist/bin.js` sits two levels below it. */
-const ROOT = resolve(__dirname, '../../..');
 
 /**
  * LocaleHub CLI.
  *
- * The CLI is a thin shell over the same services the Local MCP exposes, so a CI job and an
+ * The CLI is a thin shell over the same engine the e2e suites drive, so a CI job and an
  * interactive agent cannot drift apart (spec §14: `localehub scan`, `sync preview`, `qa`,
  * `release validate`).
  */
@@ -57,7 +54,7 @@ const HELP = `localehub <command>
 
   mcp-config [--remote <url>]
       Print the .mcp.json snippet for Claude Code / Cursor / Codex.
-      With --remote, also emit the Remote MCP entry (Streamable HTTP) for that URL.
+      Without --remote, the platform is asked for its own externally reachable MCP URL.
 
 Exit codes: 0 ok, 1 error, 2 usage error, 3 conflicts or blocked applies.
 `;
@@ -84,7 +81,7 @@ async function main(): Promise<void> {
     return init(workspace, flags);
   }
 
-  const services = new LocalMcpServices({ cwd: workspace, env: process.env });
+  const services = new LocalSyncServices({ cwd: workspace, env: process.env });
 
   switch (group) {
     case 'info':
@@ -160,7 +157,14 @@ async function main(): Promise<void> {
         if (json) return output(result);
         const summary = result.summary as { ready: number; blocked: number; total: number };
         process.stdout.write(`apply plan ${result.applyPlanId}: ${summary.ready} ready / ${summary.blocked} blocked\n`);
-        for (const change of result.changes as { filePath: string; key: string; locale: string; status: string; previousValue: string | null; newValue: string }[]) {
+        for (const change of result.changes as {
+          filePath: string;
+          key: string;
+          locale: string;
+          status: string;
+          previousValue: string | null;
+          newValue: string;
+        }[]) {
           process.stdout.write(`  [${change.status}] ${change.filePath} ${change.locale} ${change.key}\n`);
           process.stdout.write(`      - ${change.previousValue ?? '(absent)'}\n      + ${change.newValue}\n`);
         }
@@ -230,7 +234,10 @@ async function main(): Promise<void> {
       process.stdout.write(
         `QA: ${result.issueCount} issue(s) over ${result.entriesChecked} entries — ${JSON.stringify(result.bySeverity)}\n`,
       );
-      for (const issue of (result.issues as { severity: string; key?: string; locale?: string; message: string }[]).slice(0, 50)) {
+      for (const issue of (result.issues as { severity: string; key?: string; locale?: string; message: string }[]).slice(
+        0,
+        50,
+      )) {
         process.stdout.write(`  [${issue.severity}] ${issue.locale ?? ''} ${issue.key ?? ''} ${issue.message}\n`);
       }
       if ((result.bySeverity as { ERROR: number }).ERROR > 0) process.exitCode = 3;
@@ -242,24 +249,33 @@ async function main(): Promise<void> {
       return output(services.createGitPatch({ output_path: flags.output as string | undefined }));
     case 'mcp-config': {
       const loaded = loadLocalConfig(workspace);
-      // The CLI knows where this checkout is, so it can emit a path that works as-is instead of a
-      // placeholder the user has to fill in.
       const { mcpClientConfig, formatMcpClientConfig } = await import('@localehub/contracts');
-      process.stdout.write(
-        formatMcpClientConfig(
-          mcpClientConfig({
-            local: {
-              apiUrl: loaded.config.localehub.apiUrl,
-              tokenEnv: loaded.tokenEnv,
-              binPath: resolve(ROOT, 'apps/mcp-local/dist/bin.js'),
-            },
-            remote:
-              typeof flags.remote === 'string'
-                ? { url: flags.remote, tokenEnv: loaded.tokenEnv }
-                : null,
-          }),
-        ),
-      );
+
+      // The address a client must dial is a deployment fact this checkout cannot derive — behind
+      // nginx it is the public host, in development it is :3003. The platform reports its own, so
+      // asking it beats making every developer look the value up. `GET /mcp/tools` is public and
+      // carries no secrets, so this needs no token.
+      let url = typeof flags.remote === 'string' ? flags.remote : null;
+      if (!url) {
+        const apiUrl = (loaded.config.localehub.apiUrl || '').replace(/\/api\/v1\/?$/, '');
+        try {
+          const response = await fetch(`${apiUrl}/api/v1/mcp/tools`, { signal: AbortSignal.timeout(5_000) });
+          const payload = (await response.json()) as { data?: { remoteUrl?: string } };
+          url = payload.data?.remoteUrl ?? null;
+        } catch {
+          url = null;
+        }
+      }
+      if (!url) {
+        process.stderr.write(
+          `Could not determine the platform's MCP URL from ${loaded.config.localehub.apiUrl}.\n` +
+            'Pass it explicitly: localehub mcp-config --remote https://localehub.example/mcp\n',
+        );
+        process.exitCode = 2;
+        return;
+      }
+
+      process.stdout.write(formatMcpClientConfig(mcpClientConfig({ remote: { url, tokenEnv: loaded.tokenEnv } })));
       return;
     }
     case 'release': {
@@ -295,7 +311,9 @@ function printPlan(result: Record<string, unknown>): void {
   );
   for (const change of (result.changes as { action: string; locale: string; key: string; filePath: string | null }[]) ?? []) {
     if (change.action === 'SKIP') continue;
-    process.stdout.write(`  [${change.action}] ${change.locale} ${change.key}${change.filePath ? ` (${change.filePath})` : ''}\n`);
+    process.stdout.write(
+      `  [${change.action}] ${change.locale} ${change.key}${change.filePath ? ` (${change.filePath})` : ''}\n`,
+    );
   }
 }
 
@@ -370,12 +388,10 @@ function init(workspace: string, flags: Record<string, string | boolean>): void 
   };
 
   mkdirSync(join(workspace, '.localehub'), { recursive: true });
-  writeFileSync(
-    configPath,
-    `# LocaleHub repository configuration — see docs/MCP.md\n${toYaml(config)}`,
-    'utf8',
+  writeFileSync(configPath, `# LocaleHub repository configuration — see docs/MCP.md\n${toYaml(config)}`, 'utf8');
+  process.stdout.write(
+    `wrote ${configPath}\n\nNext steps:\n  1. put your project id in project.id\n  2. export ${'LOCALEHUB_TOKEN'}=...\n  3. localehub info && localehub scan\n  4. localehub sync preview\n`,
   );
-  process.stdout.write(`wrote ${configPath}\n\nNext steps:\n  1. put your project id in project.id\n  2. export ${'LOCALEHUB_TOKEN'}=...\n  3. localehub info && localehub scan\n  4. localehub sync preview\n`);
 }
 
 main().catch((error) => {

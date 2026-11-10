@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ApiClient } from '@localehub/api-client';
-import { LocalMcpServices } from '@localehub/mcp-local';
+import { LocalSyncServices } from '@localehub/local-sync';
 import { PrismaClient } from '@localehub/database';
 import { loadLocalConfig } from '@localehub/workspace';
 import { ensureApi, type ApiHandle } from './api-harness';
@@ -23,7 +23,7 @@ let api: ApiHandle | null = null;
 let session: { token: string; projectId: string };
 let admin: ApiClient;
 let token: string;
-let local: LocalMcpServices;
+let local: LocalSyncServices;
 const runId = Date.now().toString(36);
 
 function git(cwd: string, args: string[]): string {
@@ -123,7 +123,7 @@ beforeAll(async () => {
     expiresInDays: 1,
   });
   token = issued.token;
-  local = new LocalMcpServices({
+  local = new LocalSyncServices({
     cwd: WORKSPACE,
     env: { ...process.env, LOCALEHUB_TOKEN: token, LOCALEHUB_API_URL: API_BASE } as NodeJS.ProcessEnv,
   });
@@ -386,7 +386,7 @@ describe('acceptance: local repository ↔ platform sync', () => {
       projectIds: [session.projectId],
       expiresInDays: 1,
     });
-    const limited = new LocalMcpServices({
+    const limited = new LocalSyncServices({
       cwd: WORKSPACE,
       env: { ...process.env, LOCALEHUB_TOKEN: readOnly.token, LOCALEHUB_API_URL: API_BASE } as NodeJS.ProcessEnv,
     });

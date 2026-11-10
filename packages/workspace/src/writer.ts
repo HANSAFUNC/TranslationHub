@@ -24,7 +24,7 @@ export interface WriteOptions {
 }
 
 /**
- * Safe file writer for the Local MCP (spec §10.3).
+ * Safe file writer for local write-back (spec §10.3).
  *
  * Order of operations for every file:
  *   1. verify the target is writable (mapping ∩ allowWrite ∩ !denyWrite)

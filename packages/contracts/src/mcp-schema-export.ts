@@ -1,9 +1,9 @@
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { LOCAL_MCP_TOOLS, localToolSchemas, REMOTE_MCP_TOOLS, remoteToolSchemas } from './mcp-tools';
+import { REMOTE_MCP_TOOLS, remoteToolSchemas } from './mcp-tools';
 
 export interface McpToolDescriptor {
   name: string;
-  server: 'local' | 'remote';
+  server: 'remote';
   inputSchema: Record<string, unknown> | null;
 }
 
@@ -13,13 +13,8 @@ export interface McpToolDescriptor {
  * The heavy zod union is erased with an explicit cast here, inside the package that owns the
  * schemas; consumers receive plain objects and never instantiate the union type themselves.
  */
-export function mcpToolJsonSchemas(): { local: McpToolDescriptor[]; remote: McpToolDescriptor[] } {
+export function mcpToolJsonSchemas(): { remote: McpToolDescriptor[] } {
   return {
-    local: LOCAL_MCP_TOOLS.map((name) => ({
-      name,
-      server: 'local' as const,
-      inputSchema: toJsonSchema((localToolSchemas as Record<string, unknown>)[name]),
-    })),
     remote: REMOTE_MCP_TOOLS.map((name) => ({
       name,
       server: 'remote' as const,

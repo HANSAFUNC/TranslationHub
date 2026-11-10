@@ -1,20 +1,3 @@
-export const LOCAL_TOOL_DESCRIPTIONS: Record<string, string> = {
-  get_local_project_info: '读取本地 .localehub/config.yaml、仓库根目录、Git 分支与 commit（只读）',
-  scan_local_project: '扫描配置声明的语言资源文件并规范化（只读）',
-  read_project_context: '在 allowRead 白名单内读取源码/注释上下文（只读，不默认上传）',
-  get_remote_project: '读取平台项目、语言与同步配置（只读）',
-  preview_sync: '与平台做三方比较并生成变更计划（只读）',
-  push_project_changes: '将本地新增/更新推送到平台（必须 confirm=true）',
-  pull_platform_updates: '查询平台已审核译文变更（只读）',
-  preview_apply: '生成回写 patch 与风险清单（dry-run）',
-  apply_translation_updates: '将平台译文写回本地文件（必须二次确认）',
-  validate_localization_files: '本地格式、占位符、重复与缺失检查（只读）',
-  get_sync_status: '读取上次同步结果与未解决冲突（只读）',
-  resolve_sync_conflict: '以 local/remote/manual 决策解决冲突（必须显式选择）',
-  report_apply_result: '回报实际写回文件与 commit 信息',
-  create_git_patch: '生成 patch/diff 文件（默认不 commit）',
-};
-
 export const REMOTE_TOOL_DESCRIPTIONS: Record<string, string> = {
   list_projects: '列出当前 token 可访问的项目',
   get_project: '读取项目详情',

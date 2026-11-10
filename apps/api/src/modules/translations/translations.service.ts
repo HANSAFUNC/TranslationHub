@@ -234,7 +234,7 @@ export class TranslationsService {
    * Approve or reject a translation.
    *
    * Approving bumps the project revision and appends a TRANSLATION_APPROVED event, which is
-   * exactly what the Local MCP pulls (spec §3.3 step 4). AI results can never bypass this.
+   * exactly what the CLI pulls (spec §3.3 step 4). AI results can never bypass this.
    */
   async review(
     actor: ActorContext,

@@ -36,7 +36,7 @@ const LAYOUT_GUIDE = [
  * Repository sync page (spec §11.2).
  *
  * It is deliberately explicit about what the platform can and cannot see: heartbeats and scan
- * history are reported *by* the Local MCP, and the buttons that would need local access are
+ * history are reported *by* the CLI, and the buttons that would need local access are
  * replaced with the exact command to run on the developer machine.
  */
 export default function SyncPage() {
@@ -103,7 +103,7 @@ export default function SyncPage() {
     <>
       <PageHeader
         title="仓库同步"
-        description="Local MCP 在开发者机器上执行 scan / preview / push；平台只记录结果，不会主动访问本地磁盘"
+        description="CLI 在开发者机器上执行 scan / preview / push；平台只记录结果，不会主动访问本地磁盘"
         actions={
           <>
             <Button variant="outline" onClick={() => setShowConnect((open) => !open)}>
@@ -219,7 +219,7 @@ export default function SyncPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <MonitorSmartphone className="size-4" />
-                Local MCP 心跳
+                CLI 心跳
               </CardTitle>
               <CardDescription>由客户端主动上报，平台无法反向连接</CardDescription>
             </CardHeader>
@@ -251,7 +251,7 @@ export default function SyncPage() {
                 <EmptyState
                   icon={<MonitorSmartphone />}
                   title="还没有连接"
-                  description="在仓库里运行 Local MCP 的 scan_local_project 会自动注册连接。"
+                  description="在仓库里运行 localehub scan 会自动注册连接。"
                 />
               )}
             </CardContent>

@@ -10,7 +10,7 @@
   "dependencies": {
     "@localehub/api-client": "workspace:*",
     "@localehub/contracts": "workspace:*",
-    "@localehub/mcp-local": "workspace:*",
+    "@localehub/local-sync": "workspace:*",
     "@localehub/workspace": "workspace:*",
     "@localehub/database": "workspace:*",
     "@localehub/domain": "workspace:*",
@@ -18,8 +18,9 @@
     "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
     "@types/node": "^22.10.2",
-    "vitest": "^2.1.8",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

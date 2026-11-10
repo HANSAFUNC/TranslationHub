@@ -18,7 +18,7 @@ export interface GitCommandResult {
 }
 
 /**
- * Minimal git integration for the Local MCP. The MCP reports branch/commit so the platform
+ * Minimal git integration for the CLI. It reports branch/commit so the platform
  * can show provenance, and produces diffs after a write — it never commits or pushes on its
  * own (spec §10.3 point 9).
  */

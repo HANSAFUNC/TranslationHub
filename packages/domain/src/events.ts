@@ -5,7 +5,7 @@ import type { ProjectEventType } from '@localehub/contracts';
  * Project revision + event log (spec §9.2: revisions must be monotonic, never timestamps).
  *
  * Every write that a local repository should eventually observe bumps `projects.revision`
- * and appends a `project_events` row carrying that revision. Clients (Local MCP, web UI,
+ * and appends a `project_events` row carrying that revision. Clients (CLI, web UI,
  * webhooks) pull by revision cursor, so a missed webhook is always recoverable.
  */
 export async function bumpProjectRevision(tx: Prisma.TransactionClient, projectId: string): Promise<number> {

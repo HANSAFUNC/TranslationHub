@@ -1,7 +1,7 @@
 # @localehub/api
 
 NestJS REST API（`/api/v1`）。控制器只做参数校验与编排，业务逻辑全部在 `@localehub/domain`，
-因此 REST、Remote MCP、Local MCP 与 Worker 使用同一套实现。
+因此 REST、Remote MCP、CLI 与 Worker 使用同一套实现。
 
 ```bash
 pnpm --filter @localehub/api dev     # ts-node，开发

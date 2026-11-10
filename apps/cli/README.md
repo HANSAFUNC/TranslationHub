@@ -1,7 +1,7 @@
 # @localehub/cli
 
 `localehub` 命令行工具：初始化仓库配置、扫描、同步、回写、QA 与种子数据。
-它与 Local MCP 共用 `LocalMcpServices`，因此 CLI 与 Agent 的行为完全一致。
+它驱动 `@localehub/local-sync`，这是仓库读写的唯一实现，因此交互式使用与 CI 不会分叉。
 
 ```bash
 node apps/cli/dist/bin.js --help

@@ -1,13 +1,9 @@
 {
   "mcpServers": {
-    "localehub-local": {
-      "command": "node",
-      "args": ["../apps/mcp-local/dist/bin.js", "--stdio", "--workspace", "."],
-      "env": {
-        "LOCALEHUB_API_URL": "http://localhost:3001/api/v1",
-        "LOCALEHUB_WORKSPACE": ".",
-        "LOCALEHUB_TOKEN": "${LOCALEHUB_TOKEN}"
-      }
+    "localehub-remote": {
+      "type": "http",
+      "url": "http://localhost:3003/mcp",
+      "headers": { "Authorization": "Bearer ${LOCALEHUB_TOKEN}" }
     }
   }
 }

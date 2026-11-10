@@ -57,7 +57,7 @@ services:
       TRUST_PROXY: "1"
       # Public address of the Remote MCP behind nginx; the Web UI shows this to clients.
       MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-https://localhost/mcp}
-      # Likewise the address the Local MCP is told to call: it runs on a developer's machine, so
+      # Likewise the address the CLI is told to call: it runs on a developer's machine, so
       # the inherited `http://localhost:3001` would point at the developer's own laptop.
       API_BASE_URL: ${API_BASE_URL:-https://localhost/api/v1}
       # The browser is served by nginx on the same host, so the cookie-authenticated writes it

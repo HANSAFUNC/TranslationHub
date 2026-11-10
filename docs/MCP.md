@@ -1,59 +1,26 @@
-# MCP：Local 与 Remote 的边界与工具
+# MCP：平台只暴露一个 Remote MCP
 
-## 1. 为什么必须分离
+## 1. 为什么只有一个
 
-|          | Local MCP                                        | Remote MCP                                                      |
-| -------- | ------------------------------------------------ | --------------------------------------------------------------- |
-| 运行位置 | 开发者机器 / CI Runner                           | LocaleHub 服务端容器                                            |
-| 传输     | stdio                                            | Streamable HTTP                                                 |
-| 能力     | 读取受限仓库目录、生成 patch、原子写回、Git diff | 平台数据与业务（项目、Key、译文、术语、TM、QA、审核、同步状态） |
-| 权限来源 | 本地配置 + `LOCALEHUB_TOKEN` 的 scope            | Token 的 scope + 用户角色                                       |
-| 本地文件 | 受 `workspace` 白名单约束                        | **完全没有**（不存在 `read_local_file` / `write_local_file`）   |
+平台侧**只有一个 MCP 服务**：跑在服务端容器里，用 Streamable HTTP，只暴露平台数据。
 
-平台**无法**主动访问开发者机器：所有"本地动作"都由 Local MCP 在本地发起，平台只记录结果
+早期版本按交付规格 §6.1 还提供过一个「Local MCP」——在开发者机器上以 stdio 运行、能读写受
+白名单约束的仓库目录。它被移除了，原因是它没有存在的必要，还制造了两个真实问题：
+
+1. **它无法被平台侧统一管理**。它由每个开发者各自的客户端进程拉起，版本、配置、能力都随
+   机器而变；平台无法知道对面是哪个版本，也无法在不打扰用户的情况下更新它。
+2. **它让「能力清单」失去唯一来源**。工具、resource、prompt 散在两台 Server 上，平台的
+   发现接口（`GET /api/v1/mcp/tools`）只能把两份清单糊成一个扁平列表，结果是它声明了 6 条
+   没有任何 Server 实现的 resource，还把一个已删除 Server 的 prompt 当成通用清单发布。
+
+去掉之后，读写开发者仓库这件事仍然有人做，只是换了个更合适的载体：**CLI**（见 §3）。它同样
+受 workspace 白名单、备份与原子写保护，但它是一个可以按版本固定、可以在 CI 里跑、出错时退出码
+明确的普通命令行工具，而不是一个必须由 Agent 进程托管的 MCP 服务。
+
+平台因此**永远无法主动访问开发者机器**：所有「本地动作」都在本地发起，平台只记录结果
 （心跳、commit、apply report）。仓库 URL / 分支 / commit **不作为权限依据**。
 
-## 2. Local MCP
-
-### 启动
-
-```bash
-node apps/mcp-local/dist/bin.js --stdio [--workspace <path>]
-```
-
-环境变量：`LOCALEHUB_WORKSPACE`、`LOCALEHUB_API_URL`（覆盖 config）、`LOCALEHUB_TOKEN`
-（变量名可由 `.localehub/config.yaml` 的 `localehub.tokenEnv` 指定）。
-
-### 工具
-
-| 工具                          | 默认行为                | 说明                                                        |
-| ----------------------------- | ----------------------- | ----------------------------------------------------------- |
-| `get_local_project_info`      | 只读                    | 配置、workspace root、Git 分支/commit、映射、策略、上次同步 |
-| `scan_local_project`          | 只读（上传规范化条目）  | 扫描配置声明的语言文件；返回文件数/Key 数/Locale/警告       |
-| `read_project_context`        | 只读                    | 在 `allowRead` 内读取源码上下文，**不默认上传**             |
-| `get_remote_project`          | 只读                    | 平台项目、语言与同步配置                                    |
-| `preview_sync`                | 只读                    | 三方比较，生成变更计划                                      |
-| `push_project_changes`        | **必须 `confirm=true`** | 只能提交此前生成且未过期的计划                              |
-| `pull_platform_updates`       | 只读                    | 默认只返回 `APPROVED`                                       |
-| `preview_apply`               | dry-run                 | 逐文件逐 Key 的旧值/新值/风险                               |
-| `apply_translation_updates`   | **必须二次确认**        | 备份 + 原子写入 + 重解析校验                                |
-| `validate_localization_files` | 只读                    | 格式、占位符、重复 Key、缺译                                |
-| `get_sync_status`             | 只读                    | 本地状态 + 远端状态 + 未解决冲突                            |
-| `resolve_sync_conflict`       | 显式选择                | `KEEP_LOCAL` / `KEEP_REMOTE` / `MANUAL_MERGE` / `DEFER`     |
-| `report_apply_result`         | 写审计                  | 回报实际写回文件与 commit                                   |
-| `create_git_patch`            | 只读                    | 生成 patch/diff，**不 commit**                              |
-
-Resources：`localehub://local/project-info`、`localehub://local/sync-status`。
-Prompts：`sync-localization-project`、`review-localization-changes`、`fix-translation-issues`、
-`prepare-localization-release`。
-
-### 本地状态
-
-`.localehub/state.json` 记录 `lastScanId`、`lastPreview`、`pendingApplyPlans`、`lastApplyReport`、
-`history`。只保存标识与哈希，不保存 Token。`.localehub/backups|patches|reports` 存放产物，
-已在 `.gitignore` 中忽略，且扫描时会跳过整个 `.localehub` 目录。
-
-## 3. Remote MCP
+## 2. Remote MCP
 
 ```bash
 POST https://<host>/mcp
@@ -63,19 +30,20 @@ Content-Type: application/json
 
 无状态（每个请求自带凭据），因此不存在跨租户的会话泄漏面。
 
-### 3.1 客户端配置
+### 2.1 客户端配置
 
 Remote MCP 与本仓库、本地配置**无关**：它只需要一个 URL 和一个 Token，因此可以配在任何地方
 （另一台机器、CI、纯平台侧 Agent）。
 
-平台页面「MCP 管理 → 客户端配置」把下面两种片段都列了出来，带复制按钮，URL 取服务端配置的
-`MCP_PUBLIC_URL`；片段由服务端用与 CLI 相同的生成器渲染，两边不会不一致。片段里永远只有
-`${LOCALEHUB_TOKEN}` 这种环境变量引用，不会出现 Token 明文。
+平台页面「MCP 管理 → 客户端配置」把片段列出来，带复制按钮，URL 取服务端配置的 `MCP_PUBLIC_URL`；
+片段由服务端用与 CLI 相同的生成器渲染，两边不会不一致。片段里永远只有 `${LOCALEHUB_TOKEN}`
+这种环境变量引用，不会出现 Token 明文。
 
 生成片段：
 
 ```bash
-node apps/cli/dist/bin.js mcp-config --remote http://localhost:3003/mcp
+node apps/cli/dist/bin.js mcp-config                                # 向平台询问自己的 MCP 地址
+node apps/cli/dist/bin.js mcp-config --remote https://example/mcp   # 或显式指定
 ```
 
 得到：
@@ -108,6 +76,7 @@ claude mcp add --transport http localehub-remote http://localhost:3003/mcp \
   只读场景给 `project.read` + `translation.read` + `glossary.read`；需要让 Agent 写草稿再给
   `translation.write`；审核给 `translation.review`。
 - **本地开发不需要配 CORS**：Remote MCP 是给 MCP 客户端直连的，不走浏览器。
+- **不需要在仓库里装任何东西**：MCP 配置只描述一个远端 URL，与检出目录无关。
 - 生产环境把 URL 换成 nginx 暴露的地址（`location /mcp` → `mcp-remote:3003`，见
   `docker/nginx/`）。
 - 只支持 `POST /mcp`；`GET /mcp` 返回 405（无状态，没有 SSE 流可订阅）。
@@ -127,9 +96,81 @@ claude mcp add --transport http localehub-remote http://localhost:3003/mcp \
 - `review_translation_entries` 需要 `REVIEWER` 角色，且不能批准 `STALE` 译文；
 - 任何工具都不提供本地文件访问。
 
-Resources / Prompts 清单可通过 `GET /api/v1/mcp/tools` 获取（含 JSON Schema）。
+Resources / Prompts 清单可通过 `GET /api/v1/mcp/tools` 获取（含 JSON Schema）。该响应还包含
+`skillDelivery`，即下发的 URI 模板与 prompt 前缀，供 Web UI 直接渲染。
 
-## 4. Token 与 Scope
+## 3. 本地仓库操作：CLI（不是 MCP）
+
+读写开发者仓库的 14 个动作都在 CLI 里，`localehub <command>`。它们与 MCP 无关，也不需要
+MCP：Agent 可以用 Bash 调用，CI 可以直接调用，人也可以在终端里调用。
+
+```bash
+node apps/cli/dist/bin.js scan                # 扫描语言文件并规范化
+node apps/cli/dist/bin.js sync preview        # 三方比较，只读
+node apps/cli/dist/bin.js sync push --confirm # 推送本地变更
+node apps/cli/dist/bin.js pull                # 查询平台已审核译文
+node apps/cli/dist/bin.js apply preview       # 回写 dry-run
+node apps/cli/dist/bin.js apply --confirm     # 备份 + 原子写回
+node apps/cli/dist/bin.js conflicts           # 列出未解决冲突
+node apps/cli/dist/bin.js qa                  # 本地格式/占位符/缺译校验
+node apps/cli/dist/bin.js status              # 本地状态 + 远端状态
+node apps/cli/dist/bin.js patch               # 生成 patch/diff，不 commit
+node apps/cli/dist/bin.js release validate    # 发布前校验
+node apps/cli/dist/bin.js info                # 配置、workspace root、Git 状态
+node apps/cli/dist/bin.js mcp-config          # 打印 MCP 客户端配置片段
+```
+
+| 动作                  | 默认行为               | 说明                                                    |
+| --------------------- | ---------------------- | ------------------------------------------------------- |
+| `info`                | 只读                   | 配置、workspace root、Git 分支/commit、映射             |
+| `scan`                | 只读（上传规范化条目） | 扫描配置声明的语言文件；返回文件数/Key 数/警告          |
+| `sync preview`        | 只读                   | 三方比较，生成变更计划                                  |
+| `sync push`           | **必须 `--confirm`**   | 只能提交此前生成且未过期的计划                          |
+| `pull`                | 只读                   | 默认只返回 `APPROVED`                                   |
+| `apply preview`       | dry-run                | 逐文件逐 Key 的旧值/新值/风险                           |
+| `apply --confirm`     | **必须二次确认**       | 备份 + 原子写入 + 重解析校验                            |
+| `qa`                  | 只读                   | 格式、占位符、重复 Key、缺译                            |
+| `status`              | 只读                   | 本地状态 + 远端状态 + 未解决冲突                        |
+| `conflicts --resolve` | 显式选择               | `KEEP_LOCAL` / `KEEP_REMOTE` / `MANUAL_MERGE` / `DEFER` |
+| `patch`               | 只读                   | 生成 patch/diff，**不 commit**                          |
+| `release validate`    | 只读                   | 发布前校验清单                                          |
+
+三件事仍然受保护，与有没有 MCP 无关：
+
+- **workspace 白名单**：`allowRead` / `allowWrite` / `denyRead` / `denyWrite` 在每次路径解析时
+  生效，拒绝 `..` 与符号链接逃逸（`packages/workspace`）；
+- **备份与原子写**：写回前备份、临时文件原子替换、写后重新解析校验（`SafeFileWriter`）；
+- **先预览后确认**：`sync push` 与 `apply` 都要求显式确认，默认 dry-run。
+
+### 本地状态
+
+`.localehub/state.json` 记录 `lastScanId`、`lastPreview`、`pendingApplyPlans`、`lastApplyReport`、
+`history`。只保存标识与哈希，不保存 Token。`.localehub/backups|patches|reports` 存放产物，
+已在 `.gitignore` 中忽略，且扫描时会跳过整个 `.localehub` 目录。
+
+Agent 侧的正确用法：需要平台的三方比较、冲突检测与基线记录时，让 Agent 用 Bash 跑上面的命令，
+而不是绕过它们直接改译文文件——直接改会让平台失去基线，冲突检测随之失效。
+
+## 4. Skill 下发
+
+Skill（工作流程与规范文档）通过 MCP 以 resource 下发，指令型 Skill 额外注册一个 prompt：
+
+| 用途 | URI / 名称                  | 内容                                                          |
+| ---- | --------------------------- | ------------------------------------------------------------- |
+| 清单 | `localehub://skills`        | Markdown 表格，列出每个 Skill 的 resource URI 与 prompt 名称  |
+| 正文 | `localehub://skills/{slug}` | 完整 `SKILL.md`，`text/markdown`                              |
+| 调用 | `skill-<slug>`              | 仅 `PUBLISHED` + `kind=PROMPT`；可选参数 `focus` 指定本次范围 |
+
+只下发 `PUBLISHED` 的最高版本；`kind=SCRIPT` 的 Skill 只有 resource，没有 prompt。完整规则见
+[docs/SKILLS.md](./SKILLS.md#4-通过-mcp-下发给客户端)。
+
+Server 每个请求建一次（无状态），所以 Skill 是**实时**的：新发布的 Skill 下一个请求就能读到，
+不需要重启任何客户端。
+
+取数走数据库、受 RLS 约束，与 `GET /skills` 的可见性规则一致。查询失败时只记 stderr 并返回空清单
+——Skill 是附加能力，不能因为读不到它而让 15 个工具一起报错。
+
+## 5. Token 与 Scope
 
 ```json
 {
@@ -154,7 +195,7 @@ Resources / Prompts 清单可通过 `GET /api/v1/mcp/tools` 获取（含 JSON Sc
 - Token 明文只在创建时显示一次，数据库仅存 SHA-256 哈希；撤销立即生效。
 - 文件系统边界由**本地配置**决定，不依赖平台 Token。
 
-## 5. 配置校验（启动时执行）
+## 6. 配置校验（启动时执行）
 
 `.localehub/config.yaml` 加载时会检查并拒绝：
 

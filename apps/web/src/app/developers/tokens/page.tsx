@@ -38,9 +38,8 @@ const SCOPES = [
   { scope: 'release.publish', hint: '发布（需单独授权）' },
 ];
 
-/** Only the fields this page needs from `GET /mcp/tools`. */
+/** Only the field this page needs from `GET /mcp/tools`. */
 interface McpConfigResponse {
-  remoteUrl: string;
   snippets: McpClientSnippets;
 }
 
@@ -310,12 +309,7 @@ export default function TokensPage() {
 
           {/* The cards carry their own headings, so they sit directly in the column rather than
               nested inside another card. */}
-          <McpClientConfig
-            snippets={mcpConfig?.snippets}
-            remoteUrl={mcpConfig?.remoteUrl ?? ''}
-            showTokenStep={false}
-            error={mcpConfigError}
-          />
+          <McpClientConfig snippets={mcpConfig?.snippets} showTokenStep={false} error={mcpConfigError} />
         </div>
       </div>
     </>

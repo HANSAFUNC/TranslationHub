@@ -1,17 +1,12 @@
 {
-  "name": "@localehub/mcp-local",
+  "name": "@localehub/local-sync",
   "version": "0.1.0",
   "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": {
-    "localehub-mcp-local": "dist/bin.js"
-  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "start": "node dist/bin.js --stdio",
-    "dev": "node -r ts-node/register/transpile-only src/bin.ts --stdio"
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@localehub/api-client": "workspace:*",
@@ -19,12 +14,10 @@
     "@localehub/format-adapters": "workspace:*",
     "@localehub/sync-engine": "workspace:*",
     "@localehub/workspace": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.17.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   }
 }

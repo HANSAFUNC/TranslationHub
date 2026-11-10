@@ -28,12 +28,15 @@
   iOS `.strings`、`.stringsdict`、`.xcstrings`、Android `strings.xml`/`plurals.xml`、PO、XLIFF。
 - 29 个 round-trip / 原地补丁测试通过，含复数分支、XML 实体、引号与换行转义。
 
-### 1.4 Local MCP
+### 1.4 本地仓库操作（CLI）
 
-- 14 个工具 + 2 个 Resource + 4 个 Prompt，stdio 传输。
+- 平台只暴露一个 Remote MCP；本地 14 个动作在 CLI 里（scan / sync preview|push / pull /
+  apply preview|--confirm / conflicts / qa / status / patch / release validate / info / mcp-config），
+  引擎在 `packages/local-sync`，不含任何 MCP 依赖。
 - 路径安全：24 个测试通过（`..`、绝对路径、NUL、符号链接逃逸、allowRead/Write、deny 规则、
   配置校验、备份、原子写入、写后校验回滚、重复 Key 检测）。
-- 端到端验收脚本 `apps/e2e-demo/dist/run-demo.js`：**A–E 全场景 ALL ACCEPTANCE CHECKS PASSED**。
+- 端到端验收脚本 `apps/e2e-demo/dist/run-demo.js`：**A–E 全场景 ALL ACCEPTANCE CHECKS PASSED**
+  （该脚本直接驱动 `LocalSyncServices`，与 CLI 同一条代码路径）。
 
 ### 1.5 集成测试（真实 API + PostgreSQL + 文件系统）
 
@@ -62,7 +65,7 @@ Token 管理、MCP 工具清单与 Skill 列表、组织设置。
 - CLI：`init / info / scan / sync preview|push / pull / apply preview|--confirm / conflicts /
 qa / status / patch / mcp-config / release validate`。
 - Seed：组织、5 角色用户、项目、3 语言、术语、样例 Key、QA 运行、MCP Token。
-- 5 个内置 Skill（prompt 型）。
+- 5 个内置 Skill（prompt 型），通过 MCP 下发给客户端（见 §1.12）。
 - 文档：README、PRD、ARCHITECTURE、DATABASE、API、MCP、SYNC、SKILLS、DEPLOYMENT、本文件。
 
 ### 1.9 CI 恢复绿色
@@ -86,16 +89,16 @@ qa / status / patch / mcp-config / release validate`。
 此前对镜像的验证只做到「容器起得来 + 路由返回 200」，而页面是纯客户端渲染的，**HTTP 200 与页面
 能不能用无关**。改为整套 `docker compose up` 后用无头浏览器按真实路径验证，暴露两个缺陷：
 
-| #   | 现象                                                              | 根因                                                                                                                                                                                                                                     | 修法                                                                                       |
-| --- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| 1   | 页面能开、登录返回 201，但登录后每个 `/api/v1` 请求都 500          | `next.config.ts` 的 `rewrites()` 在**构建期**执行，目标地址被写进 `routes-manifest.json`。`compose.yaml` 只在运行环境设 `API_BASE_URL_INTERNAL`，于是镜像里烘焙的是 `http://localhost:3001`——在容器内那指向 web 容器自己，`ECONNREFUSED` | 改成 `docker/web.Dockerfile` 的构建参数，compose 用 `build.args` 传入                    |
-| 2   | 登录成功后的所有请求 403 `INSECURE_TRANSPORT`                     | `compose.yaml` 给 api 设了 `NODE_ENV=production`（为了让镜像行为贴近生产），但开发栈没有 TLS 终结，守卫据此拒绝一切认证流量。页面照常打开、登录也成功，所以只看「路由 200」永远发现不了 | 开发栈显式 `ALLOW_INSECURE_HTTP: "true"`；生产 overlay 显式设回 `"false"`，避免被环境合并继承 |
+| #   | 现象                                                      | 根因                                                                                                                                                                                                                                     | 修法                                                                                          |
+| --- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 1   | 页面能开、登录返回 201，但登录后每个 `/api/v1` 请求都 500 | `next.config.ts` 的 `rewrites()` 在**构建期**执行，目标地址被写进 `routes-manifest.json`。`compose.yaml` 只在运行环境设 `API_BASE_URL_INTERNAL`，于是镜像里烘焙的是 `http://localhost:3001`——在容器内那指向 web 容器自己，`ECONNREFUSED` | 改成 `docker/web.Dockerfile` 的构建参数，compose 用 `build.args` 传入                         |
+| 2   | 登录成功后的所有请求 403 `INSECURE_TRANSPORT`             | `compose.yaml` 给 api 设了 `NODE_ENV=production`（为了让镜像行为贴近生产），但开发栈没有 TLS 终结，守卫据此拒绝一切认证流量。页面照常打开、登录也成功，所以只看「路由 200」永远发现不了                                                  | 开发栈显式 `ALLOW_INSECURE_HTTP: "true"`；生产 overlay 显式设回 `"false"`，避免被环境合并继承 |
 
 生产 overlay 另修四处同源问题（**未实际执行**——`secrets/**` 在本工作区不可读写，无法起生产栈；
 端口与副本的机制用一次性 compose 项目单独实测）：
 
 - api / web 是 `replicas: 2` 却继承宿主端口映射：第二个副本必然 `Bind for 0.0.0.0:3001 failed:
-  port is already allocated`。nginx 是唯一入口，这些服务不该发布宿主端口。
+port is already allocated`。nginx 是唯一入口，这些服务不该发布宿主端口。
 - **`ports: []` 在 overlay 里是无效写法**，Compose 会忽略空列表并保留基础文件的端口。也就是说
   overlay 头部写着「PostgreSQL 和 Redis 不暴露到宿主机」，实际上 55432 / 56379 一直暴露着。
   正确写法是 `ports: !reset []`（v5.1.3 实测：`ports: []` 保留 `published: "3998"`，
@@ -103,41 +106,20 @@ qa / status / patch / mcp-config / release validate`。
 - 缺 `TRUST_PROXY`：Express 默认把 socket 地址当客户端，nginx 后面所有调用者会共用一个限流桶、
   共用一条审计身份。设 `"1"`（前面恰好一跳）。
 - `MCP_PUBLIC_URL` / `API_BASE_URL` / `CORS_ORIGINS` 未设，会继承开发默认值：页面会把
-  `localhost` 地址发给客户端，local MCP 也会被指向开发者自己的机器。
-
-## 2. 未实现 / 部分实现
-
-| 项                                                  | 状态                    | 说明                                                                                                                                                                                                                                                                         |
-| --------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAPI 3.1 自动生成 + TS Client                    | **未实现**              | 当前有 zod schema 与手写 `api-client`，无 `openapi.yaml` 生成                                                                                                                                                                                                                |
-| Remote MCP 的 OAuth 2.1                             | 部分                    | 仅 Bearer Token；无 OAuth 授权码流程                                                                                                                                                                                                                                         |
-| Remote MCP 的 Resources 模板                        | 部分                    | 只注册了 `qa-rules` 资源；项目级资源模板未注册                                                                                                                                                                                                                               |
-| Skills 脚本隔离执行器                               | **未实现**              | `kind=SCRIPT` 仅登记，任何进程都不执行（见 SKILLS.md）                                                                                                                                                                                                                       |
-| 对象存储 / 预签名 URL                               | **未实现**              | 导入导出走 JSON 响应体；未接 S3/MinIO                                                                                                                                                                                                                                        |
-| CSV / XLSX 适配器                                   | **未实现**              | 规格 §10.1 列出，本版本未实现                                                                                                                                                                                                                                                |
-| Git/GitHub App、PR 检查                             | **未实现**              | 规格 §14 第二阶段                                                                                                                                                                                                                                                            |
-| 发布快照导出为实际文件包                            | 部分                    | 快照入库与校验和字段存在，未打包导出                                                                                                                                                                                                                                         |
-| Webhook 事件推送                                    | **未实现**              | 目前依赖 `since_revision` 游标拉取                                                                                                                                                                                                                                           |
-| 多组织切换 UI                                       | 部分                    | API 支持 `switch-organization`，UI 只展示列表                                                                                                                                                                                                                                |
-| 用户管理 UI（邀请/改角色）                          | 部分                    | API `POST /projects/:id/members` 存在，UI 未提供表单                                                                                                                                                                                                                         |
-| 前端单元测试                                        | **未实现**              | 仓库里没有 Playwright / RTL 用例，也没有进 CI 的浏览器测试。人工验证用无头 Chrome（CDP）脚本，判定标准是「页面出现真实数据且无错误提示」，不是 HTTP 200——后者在 API 全挂时依然成立，本文件 §1.10 就是这么被骗过一次的 |
-| Docker 镜像与整套 compose 栈                        | **已完成**              | `docker compose up -d --build` 起全套（postgres / redis / api / worker / mcp-remote / web）。无头 Chrome 实测 24/24：登录后首页、9 条路由与两张项目详情页都渲染出真实数据（不是只 HTTP 200），`/mcp`「客户端配置」三个片段可渲染可复制，桌面与 390px 均无横向溢出；Remote MCP 用 SDK 客户端握手 15 个工具，本地文件类工具未暴露。**过程中发现并修掉两个只在容器里出现的缺陷，见 §1.10** |
-| i18n Adapter：JSON 数组/ICU AST                     | 部分                    | ICU 复数以字符串形式保存，非 AST 级编辑                                                                                                                                                                                                                                      |
-| `file_hash` 级别的映射变更检测                      | 部分                    | 已存 `local_file_id/path`，`FILE_MAPPING_CHANGED` 冲突原因已定义但未产生                                                                                                                                                                                                     |
-| `organizations` / `users` / `review_actions` 的 RLS | **未覆盖**              | 这三张表没有 `organization_id` 列（`review_actions` 通过 `review_tasks` 关联），未启用行级策略。应用角色可读取全部用户行（含密码哈希）——前提是先通过鉴权；认证路径本就走特权通道。补法见 §5 第 1 项                                                                          |
+  `localhost` 地址发给客户端。
 
 ### 1.8 请求层安全基线（本轮新增）
 
 | 项           | 实现                                                                                                              | 验证                                                                  |
 | ------------ | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | 浏览器会话   | HttpOnly + SameSite=Lax Cookie；CSRF Token 放在可读 Cookie 里做双提交；写请求另校验 Origin/Referer                | 集成测试 4 项 + 无头 Chrome 实测 `httpOnly=true`、`localStorage` 为空 |
-| Bearer 凭据  | CLI / Local MCP / Remote MCP / 集成脚本继续用 `Authorization: Bearer`，不受 CSRF 约束                             | 集成测试「keeps bearer credentials working」                          |
+| Bearer 凭据  | CLI / Remote MCP / 集成脚本继续用 `Authorization: Bearer`，不受 CSRF 约束                                         | 集成测试「keeps bearer credentials working」                          |
 | 传输         | `NODE_ENV=production` 下纯 HTTP 携带凭据返回 `INSECURE_TRANSPORT`（public 路由除外）                              | 集成测试起第二个 production 模式实例验证                              |
 | 限流         | 全部端点；已认证按 actor，登录/注册按（IP, 账号）+ 更宽松的 IP 桶；Redis 共享计数，Redis 挂了退化为单进程并打日志 | 16 个单元测试 + 集成测试实测 429                                      |
 | 安全响应头   | helmet（CSP / HSTS / X-Frame-Options / nosniff / COOP 等）                                                        | 预检与业务响应实测                                                    |
 | 草稿回写策略 | `organizations.allow_draft_apply` 默认 false，平台侧拒绝 `POLICY_VIOLATION`                                       | 集成测试 + 演示场景 D + 设置页开关                                    |
 | 同源反代     | Next.js 增加 `/api/v1/*` rewrite，浏览器默认走同源，Cookie 保持 first-party                                       | 无头 Chrome 全流程 20/20                                              |
-| 角色校验     | `@RequireRole` 在 guard 里**只在路由带 projectId 时生效**；不带 projectId 的路由必须在 handler 里补 `assertRole`   | 逐路由审计 + 新增集成测试（见 §1.11）                                 |
+| 角色校验     | `@RequireRole` 在 guard 里**只在路由带 projectId 时生效**；不带 projectId 的路由必须在 handler 里补 `assertRole`  | 逐路由审计 + 新增集成测试（见 §1.11）                                 |
 
 ### 1.11 `DELETE /mcp-tokens/:id` 的角色校验从未生效
 
@@ -156,6 +138,103 @@ UI 按 `/auth/me` 的角色隐藏吊销按钮，并让失败有 toast 而不是�
 回归测试写在 `security.integration.test.ts`：先用未修复的构建确认它失败（期望 403 实得 200），
 再确认修复后通过，并断言「拒绝之后 Token 确实仍有效」与「OWNER 仍可吊销」——只断言状态码会
 漏掉「返回 403 但其实已经写进去了」这类实现。
+
+### 1.12 Skill 通过 MCP 下发给客户端
+
+Skill 是文档，因此以 MCP **resource** 下发，指令型 Skill 额外注册 MCP **prompt**（客户端里是可调用
+命令）。没有新增工具：规格 §6.2 把工具面固定在 14 local / 15 remote，而「读已发布的规范」不是一个需
+要单独授权的平台能力（REST 侧 `GET /skills` 同样不带 role 或 scope 要求）。
+
+| 端点                        | 内容                                                         |
+| --------------------------- | ------------------------------------------------------------ |
+| `localehub://skills`        | 清单（Markdown 表格：slug、版本、resource URI、prompt 名称） |
+| `localehub://skills/{slug}` | 完整 `SKILL.md`（含 frontmatter），`text/markdown`           |
+| `skill-<slug>`              | 仅 `PUBLISHED` + `kind=PROMPT`；可选参数 `focus`             |
+
+规则（`packages/contracts/src/mcp-skills.ts` 一份实现，两个 Server、API 与 Web UI 共用）：
+只下发 `PUBLISHED`；每 slug 只取最高版本（`1.10.0` > `1.9.0`，按数字比较）；`kind=SCRIPT` 只有
+resource 没有 prompt；prompt 名统一加 `skill-` 前缀。
+
+`skill-` 前缀不是装饰：`McpServer.registerPrompt` 对重名**直接抛错**，而那个错发生在 Server 构建
+阶段——一个 slug 撞上内置 prompt 名，等于整台 Server 每个请求都失败，不只是该 Skill 不可用。
+`REMOTE_MCP_PROMPTS`（与 `REMOTE_MCP_RESOURCES` 一起）是第二道防线，也是发现接口的唯一来源。
+
+失败降级是**有意的**：skills 查询抛错时只记 stderr 并返回空列表（否则一个附加功能会带塌
+15 个工具）。Remote MCP 无状态、每个请求建一次 Server，所以 Skill 是实时的——新发布的 Skill
+下一个请求就能读到，不需要重启任何客户端。
+
+验证（真实协议，不是断言内部对象）：
+
+- 单元：`packages/contracts/src/__tests__/mcp-skills.test.ts`（15 个，含 `1.10.0 > 1.9.0` 与
+  pre-release 排序）、Remote MCP 用 SDK 的 `InMemoryTransport` 跑真实 MCP 协议（8 个，其中 2 个
+  断言「注册了什么」与「`/mcp/tools` 声明了什么」完全一致）；
+- 集成：`skill-delivery.integration.test.ts`（11 个）——真库 + 真 API + 真 Remote MCP 进程 +
+  真 Streamable HTTP 客户端，覆盖「DRAFT 不下发」「取最高版本」「跨组织不可见」「SCRIPT 无 prompt」
+  「内置 prompt 与生成的 prompt 并存不重名」「`GET /skills` 的注解与 Server 一致」；
+- 实测：容器栈里注册 5 个内置 Skill 后，SDK 客户端列出 7 个 resource、7 个 prompt，读到
+  `translation-review` 正文 572 字节。
+
+顺带修掉一个上游缺陷：`LOCALEHUB_API_URL`（文档写明覆盖 config 文件）此前被已删除的 MCP 入口写在
+它自己那份 `LoadedConfig` 上，而 `LocalSyncServices` 会重新加载配置，于是覆盖被静默丢弃——所有
+调用方都在和 config 文件里的地址通信。已移到 `LocalSyncServices.config()`（真正读配置的地方），
+`services.test.ts` 有回归测试。
+
+### 1.13 平台改为只暴露一个 MCP（偏离规格 §6.1 / §6.2）
+
+**决定由用户做出**：不再提供 Local MCP，平台侧只保留 Remote MCP。这与交付规格 §6.1
+（「必须采用双 MCP 边界」）与 §6.2（「Local MCP Tools（必须实现）」）不一致，是本项目
+**有意偏离规格**的一处。
+
+理由：
+
+1. Local MCP 由每个开发者的客户端进程各自拉起，版本与能力随机器而变，平台无法统一管理、
+   也无法在不打扰用户的情况下更新；
+2. 它让「能力清单」失去唯一来源——工具、resource、prompt 散在两台 Server 上，平台的发现接口
+   只能把两份清单糊成一个扁平列表，结果声明了 6 条没有任何 Server 实现的 resource，还把一个
+   已删除 Server 的 prompt 当成通用清单发布（见 §1.12）。
+
+**本地仓库读写并没有消失**，只是换了载体：`apps/mcp-local` 删除，引擎原地成为
+`packages/local-sync`（不含任何 MCP 依赖，类名 `LocalMcpServices` → `LocalSyncServices`），
+由 `apps/cli` 驱动。安全属性逐条保留：
+
+| 属性                                                         | 原来由谁保证       | 现在由谁保证                        |
+| ------------------------------------------------------------ | ------------------ | ----------------------------------- |
+| `allowRead`/`allowWrite`/`deny*` 白名单、`..` 与符号链接逃逸 | Local MCP 工具层   | 同一份 `WorkspaceGuard`（CLI）      |
+| 备份 + 原子写 + 写后重解析                                   | Local MCP 工具层   | 同一份 `SafeFileWriter`（CLI）      |
+| 先预览后确认、默认 dry-run                                   | MCP `confirm=true` | CLI `--confirm`（缺省即拒绝）       |
+| 平台够不到开发者磁盘                                         | 两 Server 分离     | 只有一个平台侧 Server，结构上更彻底 |
+
+失去的是：MCP `annotations` 的 `readOnlyHint` 不再覆盖本地动作（客户端无法据此决定是否弹确认），
+改由 CLI 的 `--confirm` 与退出码承担；Agent 需要本地能力时必须用 Bash 调 CLI，而不是调 MCP 工具。
+
+契约层同步收缩：`LOCAL_MCP_TOOLS` / `localToolSchemas` / `LOCAL_TOOL_DESCRIPTIONS` 删除；
+`localServerConfig` 与 `localAndRemote` 片段删除；`mcpClientConfig` 只剩单条远端条目，
+`localehub mcp-config` 不带 `--remote` 时向平台的公开发现接口询问自己的地址。
+
+顺带修掉 §1.12 提到的发现接口失真：`REMOTE_MCP_RESOURCES` / `REMOTE_MCP_PROMPTS` 进契约，
+Server 与 `/mcp/tools` 从同一处取，并有集成测试断言「声明的每一条都真的注册了」——那条
+`localehub://projects/{projectId}` 及其 4 个子资源从未被任何 Server 实现，已从声明中移除。
+
+## 2. 未实现 / 部分实现
+
+| 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAPI 3.1 自动生成 + TS Client                    | **未实现** | 当前有 zod schema 与手写 `api-client`，无 `openapi.yaml` 生成                                                                                                                                                                                                                                                                                                                           |
+| Remote MCP 的 OAuth 2.1                             | 部分       | 仅 Bearer Token；无 OAuth 授权码流程                                                                                                                                                                                                                                                                                                                                                    |
+| Remote MCP 的 Resources 模板                        | 部分       | 已注册 `qa-rules`、`localehub://skills` 与 `localehub://skills/{slug}`。项目级资源模板（`localehub://projects/{projectId}` 及其子资源）**未实现**，已从 `/mcp/tools` 的声明中移除——声明一条没有 Server 实现的 resource 会让客户端去读一个必然失败的地址（见 §1.13）                                                                                                                     |
+| Skills 脚本隔离执行器                               | **未实现** | `kind=SCRIPT` 仅登记，任何进程都不执行（见 SKILLS.md）                                                                                                                                                                                                                                                                                                                                  |
+| 对象存储 / 预签名 URL                               | **未实现** | 导入导出走 JSON 响应体；未接 S3/MinIO                                                                                                                                                                                                                                                                                                                                                   |
+| CSV / XLSX 适配器                                   | **未实现** | 规格 §10.1 列出，本版本未实现                                                                                                                                                                                                                                                                                                                                                           |
+| Git/GitHub App、PR 检查                             | **未实现** | 规格 §14 第二阶段                                                                                                                                                                                                                                                                                                                                                                       |
+| 发布快照导出为实际文件包                            | 部分       | 快照入库与校验和字段存在，未打包导出                                                                                                                                                                                                                                                                                                                                                    |
+| Webhook 事件推送                                    | **未实现** | 目前依赖 `since_revision` 游标拉取                                                                                                                                                                                                                                                                                                                                                      |
+| 多组织切换 UI                                       | 部分       | API 支持 `switch-organization`，UI 只展示列表                                                                                                                                                                                                                                                                                                                                           |
+| 用户管理 UI（邀请/改角色）                          | 部分       | API `POST /projects/:id/members` 存在，UI 未提供表单                                                                                                                                                                                                                                                                                                                                    |
+| 前端单元测试                                        | **未实现** | 仓库里没有 Playwright / RTL 用例，也没有进 CI 的浏览器测试。人工验证用无头 Chrome（CDP）脚本，判定标准是「页面出现真实数据且无错误提示」，不是 HTTP 200——后者在 API 全挂时依然成立，本文件 §1.10 就是这么被骗过一次的                                                                                                                                                                   |
+| Docker 镜像与整套 compose 栈                        | **已完成** | `docker compose up -d --build` 起全套（postgres / redis / api / worker / mcp-remote / web）。无头 Chrome 实测 24/24：登录后首页、9 条路由与两张项目详情页都渲染出真实数据（不是只 HTTP 200），`/mcp`「客户端配置」三个片段可渲染可复制，桌面与 390px 均无横向溢出；Remote MCP 用 SDK 客户端握手 15 个工具，本地文件类工具未暴露。**过程中发现并修掉两个只在容器里出现的缺陷，见 §1.10** |
+| i18n Adapter：JSON 数组/ICU AST                     | 部分       | ICU 复数以字符串形式保存，非 AST 级编辑                                                                                                                                                                                                                                                                                                                                                 |
+| `file_hash` 级别的映射变更检测                      | 部分       | 已存 `local_file_id/path`，`FILE_MAPPING_CHANGED` 冲突原因已定义但未产生                                                                                                                                                                                                                                                                                                                |
+| `organizations` / `users` / `review_actions` 的 RLS | **未覆盖** | 这三张表没有 `organization_id` 列（`review_actions` 通过 `review_tasks` 关联），未启用行级策略。应用角色可读取全部用户行（含密码哈希）——前提是先通过鉴权；认证路径本就走特权通道。补法见 §5 第 1 项                                                                                                                                                                                     |
 
 ## 3. 已知风险与设计取舍
 
@@ -184,22 +263,25 @@ UI 按 `/auth/me` 的角色隐藏吊销按钮，并让失败有 toast 而不是�
 ```bash
 pnpm -r build                     # 全部 packages + apps 编译通过
 pnpm --filter @localehub/web exec next build   # 15 条路由构建成功
-pnpm exec tsc -p tsconfig.json --noEmit        # api / web / mcp-local / cli / mcp-remote 均通过
-pnpm test                                      # 88 unit tests passed（19 + 29 + 24 + 16）
-pnpm test:integration                          # 25 integration tests passed（14 验收 + 11 安全）
+pnpm -r typecheck                              # 16 个 workspace 项目全部通过
+pnpm test                                      # 114 unit tests passed
+pnpm test:integration                          # 37 integration tests passed（14 验收 + 12 安全 + 11 Skill 下发）
 node apps/e2e-demo/dist/run-demo.js            # ALL ACCEPTANCE CHECKS PASSED（A–E）
 docker compose config                          # valid
 docker compose -f compose.yaml -f compose.production.yaml config   # valid
 docker compose up -d --build                   # 整套栈起来，5 个服务健康
 docker compose exec -T web node -e "…routes-manifest…"   # 转发目标 = http://api:3001/api/v1
 curl -b cookie http://localhost:3000/api/v1/projects    # 200，走 web 容器转发
-docker run --network host … localehub-api:test # health=ok, login ok, /mcp/tools 返回 14 local + 15 remote
+docker run --network host … localehub-api:test # health=ok, login ok, /mcp/tools 返回 15 个工具（无 local 段）
 docker build -f docker/web.Dockerfile .        # 成功（localehub-web:test）
 pnpm exec eslint . --max-warnings 0            # 0 error / 0 warning
 node apps/e2e-demo/dist/run-demo.js            # 连续两次运行均 ALL ACCEPTANCE CHECKS PASSED
 psql -U localehub_app …                        # 验证 RLS：无 org 上下文 0 行；跨租户写入被拒绝
 curl /api/v1/health                            # {"status":"ok","checks":{"database":true}}
 curl -o /dev/null -w %{http_code} /login 等     # 8 个页面均 200
+curl /api/v1/mcp/tools | jq '.data \| keys'    # ["prompts","remote","remoteUrl","resources","skillDelivery","snippets"]，无 local
+node apps/cli/dist/bin.js mcp-config           # 向平台问自己的地址，输出单条 localehub-remote 配置
+cd .demo-workspace && node …/bin.js info|scan|sync preview   # 本地链路走通（scan 2 文件 / 6 条目）
 ```
 
 ## 5. 建议的后续优先级
@@ -225,8 +307,8 @@ curl -o /dev/null -w %{http_code} /login 等     # 8 个页面均 200
 | GitHub Actions `CI`（main）                      | **通过**（Run 5）                       |
 | Local / Remote MCP 真实客户端握手                | 通过（见附二）                          |
 | 端到端演示连续两次运行                           | 均通过（demo 自带项目清理，可重复执行） |
-| `pnpm test`                                      | 88 passed                               |
-| `pnpm test:integration`                          | 25 passed                               |
+| `pnpm test`                                      | 123 passed                              |
+| `pnpm test:integration`                          | 37 passed                               |
 | `node apps/e2e-demo/dist/run-demo.js`            | ALL ACCEPTANCE CHECKS PASSED            |
 | `docker compose config`（含 production overlay） | valid                                   |
 | `docker compose up -d --build`（整套栈）         | 5 个服务全部起，浏览器实测 24/24        |
@@ -246,19 +328,28 @@ docker build -f docker/web.Dockerfile -t localehub-web:local .
 
 ## 附二：MCP 传输层实测
 
-| 验证                                                | 结果                                                                              |
-| --------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Local MCP（stdio）被真实 MCP Client 连接            | `connected: localehub-local 0.1.0`                                                |
-| Local MCP 工具数                                    | 14（名称与规格 §6.2 完全一致）                                                    |
-| Local MCP Resources / Prompts                       | 2 / 4                                                                             |
-| `get_local_project_info`                            | 返回项目、2 个映射、Git 分支与 commit                                             |
-| `validate_localization_files`                       | 6 条条目、0 问题                                                                  |
-| `push_project_changes(confirm=false)`               | 被拒绝（`requiresConfirmation: true`）                                            |
-| `read_project_context` 越界 glob                    | 0 个 allowed，路径逃逸被阻断                                                      |
-| Remote MCP（Streamable HTTP）被真实 MCP Client 连接 | `connected: localehub-remote 0.1.0`                                               |
-| Remote MCP 工具数                                   | 15（与规格 §6.4 一致）                                                            |
-| Remote MCP 是否暴露本地文件工具                     | 否（检查 `read_local_file` / `write_local_file` / `read_file` / `exec` 均不存在） |
-| `list_projects` / `get_project_sync_status`         | 正常返回                                                                          |
+平台只有一个 MCP，下表的「工具」一列是它的 15 个平台工具；本地动作在 CLI 里，另表列出。
+
+| 验证                                                | 结果                                                                                            |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Remote MCP（Streamable HTTP）被真实 MCP Client 连接 | `connected: localehub-remote 0.1.0`                                                             |
+| Remote MCP 工具数                                   | 15（与规格 §6.4 一致）                                                                          |
+| Remote MCP 是否暴露本地文件工具                     | 否（检查 `read_local_file` / `write_local_file` / `read_file` / `exec` 均不存在）               |
+| `list_projects` / `get_project_sync_status`         | 正常返回                                                                                        |
+| Remote MCP Resources / Prompts                      | 7 / 7（`qa-rules` + `skills` + `skills/{slug}` + 3 个 Skill resource；2 内置 + 5 Skill prompt） |
+| `localehub://skills/{slug}`                         | 返回完整 `SKILL.md`（含 frontmatter），`text/markdown`                                          |
+| 未发布 slug 的 resource 读取                        | 被拒绝（`NOT_FOUND`），不是返回空文档                                                           |
+| `/mcp/tools` 声明的 resource 与 prompt              | 与上面实测逐条一致（集成测试断言，非人工比对）                                                  |
+
+本地动作（CLI，不经过 MCP）：
+
+| 验证                                        | 结果                                                    |
+| ------------------------------------------- | ------------------------------------------------------- |
+| `localehub info`                            | 返回配置、workspace root、项目、apiUrl、Git 状态        |
+| `localehub scan`                            | `scanned 2 file(s), 6 entr(ies), locales: en-US, ja-JP` |
+| `localehub sync preview` / `push --confirm` | 走通（见验收脚本 A–E）                                  |
+| `localehub mcp-config`                      | 输出单条 `localehub-remote`，URL 由平台报告             |
+| `apply --confirm`                           | 备份 + 原子写 + 重解析校验（24 个 workspace 测试）      |
 
 修复记录：Remote MCP 最初把数组作为 `structuredContent` 返回，被 MCP 客户端以
 `-32602 Invalid tools/call result` 拒绝；已在两个 MCP 服务端统一做「数组包装为 `{items}`」规范化。
@@ -266,23 +357,26 @@ docker build -f docker/web.Dockerfile -t localehub-web:local .
 
 ## 附三：本次交付中发现并修复的问题
 
-| 问题                                                                 | 影响                                            | 修复                                                            |
-| -------------------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
-| 归档动作映射颠倒（`ARCHIVE_CANDIDATE` / `REMOTE_ARCHIVE_CANDIDATE`） | 本地删除会被误判为远端删除                      | 交换两处返回值并补分支测试                                      |
-| YAML 补丁丢失注释                                                    | 回写会破坏 YAML 文件注释                        | 改用 `yaml` 的 Document API                                     |
-| JSON 新增嵌套 Key 时空节点不存在                                     | 新增 Key 报错                                   | 递归创建中间对象                                                |
-| JSON 插入点落在收尾换行之后                                          | 生成非法 JSON（逗号独占一行）                   | 插入点回退到末尾空白之前                                        |
-| 认证查询未走特权路径                                                 | RLS 导致登录/Token 校验查不到 membership        | 统一走 `withoutTenantScope`                                     |
-| `getChanges` 用 `array_contains` 过滤 JSON 字符串                    | 平台变更永远拉不到                              | 移除 SQL 过滤，改为应用层按 locale 过滤                         |
-| 新版本未清空 `applied_to_repo_at`                                    | 已应用的条目标记污染新版本，pull 过滤掉真实变更 | 仅仓库推送才标记为已应用                                        |
-| 冲突解决写回使用扁平字段缺失                                         | 解决冲突后平台值不更新                          | 补齐 `baseValue/localValue/remoteValue`                         |
-| 冲突解决的 Key 查询忽略 namespace                                    | 带 namespace 的项目无法写回                     | 通过 namespace 行再查 Key                                       |
-| Remote MCP 返回数组作为 `structuredContent`                          | MCP 客户端报 `-32602`                           | 两个 MCP 服务端统一包装为 `{items}`                             |
-| `apps/mcp-remote` 缺少 `reflect-metadata`                            | 远程 MCP 无法启动                               | 补依赖                                                          |
-| AuthGuard 把 `params.id` 当 projectId                                | 项目级成员（组织角色为 READONLY）被误拒         | 仅在路由确有 projectId 时做项目级角色判断，其余由服务层显式断言 |
-| 缺少 `DELETE /projects/:id`                                          | 无法清理项目，演示不可重复                      | 新增删除端点（需 `confirmName` 二次确认）                       |
-| Dockerfile 在 `prisma generate` 前编译 database 包                   | 镜像构建失败                                    | 调整构建顺序                                                    |
-| Docker runtime 阶段只拷贝部分目录                                    | 容器内 `MODULE_NOT_FOUND`                       | 拷贝完整构建产物                                                |
-| Web 容器用 corepack 启动 pnpm                                        | 启动时联网下载 pnpm 导致启动失败                | 直接执行 next                                                   |
-| Web 容器 `next start` 工作目录为 `/app`                              | 找不到 `.next`，容器无法启动                    | 运行时 `WORKDIR /app/apps/web`                                  |
-| 浏览器端硬编码 API 主机                                              | 反向代理部署下前端打不到 API                    | 未配置 `NEXT_PUBLIC_API_BASE_URL` 时回退到同源 `/api/v1`        |
+| 问题                                                                     | 影响                                               | 修复                                                               |
+| ------------------------------------------------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------ |
+| 归档动作映射颠倒（`ARCHIVE_CANDIDATE` / `REMOTE_ARCHIVE_CANDIDATE`）     | 本地删除会被误判为远端删除                         | 交换两处返回值并补分支测试                                         |
+| YAML 补丁丢失注释                                                        | 回写会破坏 YAML 文件注释                           | 改用 `yaml` 的 Document API                                        |
+| JSON 新增嵌套 Key 时空节点不存在                                         | 新增 Key 报错                                      | 递归创建中间对象                                                   |
+| JSON 插入点落在收尾换行之后                                              | 生成非法 JSON（逗号独占一行）                      | 插入点回退到末尾空白之前                                           |
+| 认证查询未走特权路径                                                     | RLS 导致登录/Token 校验查不到 membership           | 统一走 `withoutTenantScope`                                        |
+| `getChanges` 用 `array_contains` 过滤 JSON 字符串                        | 平台变更永远拉不到                                 | 移除 SQL 过滤，改为应用层按 locale 过滤                            |
+| 新版本未清空 `applied_to_repo_at`                                        | 已应用的条目标记污染新版本，pull 过滤掉真实变更    | 仅仓库推送才标记为已应用                                           |
+| 冲突解决写回使用扁平字段缺失                                             | 解决冲突后平台值不更新                             | 补齐 `baseValue/localValue/remoteValue`                            |
+| 冲突解决的 Key 查询忽略 namespace                                        | 带 namespace 的项目无法写回                        | 通过 namespace 行再查 Key                                          |
+| Remote MCP 返回数组作为 `structuredContent`                              | MCP 客户端报 `-32602`                              | 两个 MCP 服务端统一包装为 `{items}`                                |
+| `apps/mcp-remote` 缺少 `reflect-metadata`                                | 远程 MCP 无法启动                                  | 补依赖                                                             |
+| AuthGuard 把 `params.id` 当 projectId                                    | 项目级成员（组织角色为 READONLY）被误拒            | 仅在路由确有 projectId 时做项目级角色判断，其余由服务层显式断言    |
+| 缺少 `DELETE /projects/:id`                                              | 无法清理项目，演示不可重复                         | 新增删除端点（需 `confirmName` 二次确认）                          |
+| Dockerfile 在 `prisma generate` 前编译 database 包                       | 镜像构建失败                                       | 调整构建顺序                                                       |
+| Docker runtime 阶段只拷贝部分目录                                        | 容器内 `MODULE_NOT_FOUND`                          | 拷贝完整构建产物                                                   |
+| Web 容器用 corepack 启动 pnpm                                            | 启动时联网下载 pnpm 导致启动失败                   | 直接执行 next                                                      |
+| Web 容器 `next start` 工作目录为 `/app`                                  | 找不到 `.next`，容器无法启动                       | 运行时 `WORKDIR /app/apps/web`                                     |
+| `LOCALEHUB_API_URL` 覆盖被静默丢弃                                       | 所有调用方都在和 config 文件里的地址通信           | 移到 `LocalSyncServices.config()`（见 §1.12）                      |
+| 去掉 Local MCP（用户决定）                                               | 两个 MCP 意味着版本/能力无法统一管理，发现接口失真 | 删除 `apps/mcp-local`；引擎移到 `packages/local-sync`，由 CLI 驱动 |
+| `/mcp/tools` 声明了 6 条未实现的 resource 与 1 个已删除 Server 的 prompt | 发现接口高估能力                                   | 资源/prompt 清单进契约，集成测试断言「声明 == 实际注册」           |
+| 浏览器端硬编码 API 主机                                                  | 反向代理部署下前端打不到 API                       | 未配置 `NEXT_PUBLIC_API_BASE_URL` 时回退到同源 `/api/v1`           |

@@ -210,7 +210,7 @@ export default function ConflictsPage() {
             </div>
 
             <p className="text-muted-foreground text-xs">
-              保留本地 / 手工合并会立即在平台产生一条 APPROVED 版本（新 revision 事件），随后用 Local MCP 的 preview_sync
+              保留本地 / 手工合并会立即在平台产生一条 APPROVED 版本（新 revision 事件），随后用 localehub sync preview
               重新计算计划即可；采用平台只记录决策，本地文件需要 pull → preview_apply → apply 才会变化。
             </p>
           </CardContent>

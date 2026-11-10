@@ -29,7 +29,7 @@ export interface SyncIdentity {
   locale: string;
 }
 
-/** Local side of a comparison, produced by the Local MCP scan. */
+/** Local side of a comparison, produced by a CLI scan. */
 export interface LocalEntrySnapshot extends SyncIdentity {
   value: string | null;
   contentHash: string | null;

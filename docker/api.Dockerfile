@@ -11,7 +11,7 @@ COPY packages ./packages
 COPY apps/api/package.json ./apps/api/package.json
 COPY apps/worker/package.json ./apps/worker/package.json
 COPY apps/mcp-remote/package.json ./apps/mcp-remote/package.json
-COPY apps/mcp-local/package.json ./apps/mcp-local/package.json
+COPY packages/local-sync/package.json ./packages/local-sync/package.json
 COPY apps/cli/package.json ./apps/cli/package.json
 COPY apps/e2e-demo/package.json ./apps/e2e-demo/package.json
 COPY apps/web/package.json ./apps/web/package.json
@@ -24,7 +24,7 @@ COPY packages ./packages
 # Prisma Client must exist before any package that imports it is compiled.
 RUN pnpm --filter @localehub/database exec prisma generate \
  && pnpm --filter './packages/**' build \
- && pnpm --filter @localehub/api --filter @localehub/worker --filter @localehub/mcp-remote --filter @localehub/mcp-local --filter @localehub/cli build
+ && pnpm --filter @localehub/api --filter @localehub/worker --filter @localehub/mcp-remote --filter @localehub/local-sync --filter @localehub/cli build
 
 FROM base AS runtime
 ENV NODE_ENV=production

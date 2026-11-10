@@ -2,27 +2,28 @@ import { z } from 'zod';
 import { localeTagSchema, platformSchema } from './schemas';
 
 /**
- * Canonical registry of MCP tools. Shared by the Local MCP, the Remote MCP and the
- * documentation generator so that all three stay in sync (spec §6.2, §6.4).
+ * Canonical registry of the Remote MCP's tools. Shared by the server, the API's discovery
+ * endpoint and the documentation generator so that all three stay in sync (spec §6.4).
+ *
+ * There is no local registry: the platform exposes exactly one MCP, and work on a developer's
+ * checkout is the CLI's job rather than an MCP server's. See `docs/MCP.md`.
  */
 
-export const LOCAL_MCP_TOOLS = [
-  'get_local_project_info',
-  'scan_local_project',
-  'read_project_context',
-  'get_remote_project',
-  'preview_sync',
-  'push_project_changes',
-  'pull_platform_updates',
-  'preview_apply',
-  'apply_translation_updates',
-  'validate_localization_files',
-  'get_sync_status',
-  'resolve_sync_conflict',
-  'report_apply_result',
-  'create_git_patch',
-] as const;
-export type LocalMcpTool = (typeof LOCAL_MCP_TOOLS)[number];
+/**
+ * Resources the Remote MCP registers that are not per-skill.
+ *
+ * Listed here so the discovery endpoint and the server cannot disagree: the endpoint used to
+ * advertise six `localehub://projects/...` resources that neither server ever registered.
+ */
+export const REMOTE_MCP_RESOURCES = ['localehub://qa-rules'] as const;
+
+/**
+ * Hand-written prompts the Remote MCP registers.
+ *
+ * The per-skill prompts (`skill-<slug>`) are generated from what an organization has published, so
+ * they are not listed here — read `localehub://skills` for those.
+ */
+export const REMOTE_MCP_PROMPTS = ['review-localization-changes', 'fix-translation-issues'] as const;
 
 export const REMOTE_MCP_TOOLS = [
   'list_projects',
@@ -42,86 +43,6 @@ export const REMOTE_MCP_TOOLS = [
   'validate_release',
 ] as const;
 export type RemoteMcpTool = (typeof REMOTE_MCP_TOOLS)[number];
-
-export const localToolSchemas = {
-  get_local_project_info: z.object({}),
-  scan_local_project: z.object({
-    project_id: z.string().optional(),
-    file_set_ids: z.array(z.string()).optional(),
-    include_context: z.boolean().default(false),
-  }),
-  read_project_context: z.object({
-    glob: z.string().min(1),
-    max_files: z.number().int().positive().max(50).default(5),
-    max_bytes_per_file: z.number().int().positive().max(200_000).default(20_000),
-  }),
-  get_remote_project: z.object({ project_id: z.string().optional() }),
-  preview_sync: z.object({
-    project_id: z.string().optional(),
-    direction: z.enum(['bidirectional', 'push', 'pull']).default('bidirectional'),
-    scan_id: z.string().optional(),
-    include_deletes: z.boolean().default(false),
-    include_drafts: z.boolean().default(false),
-    file_set_ids: z.array(z.string()).optional(),
-    locales: z.array(localeTagSchema).optional(),
-  }),
-  push_project_changes: z.object({
-    preview_id: z.string().optional(),
-    sync_plan_id: z.string().optional(),
-    confirm: z.boolean().default(false),
-    idempotency_key: z.string().optional(),
-    include_deletes: z.boolean().default(false),
-  }),
-  pull_platform_updates: z.object({
-    project_id: z.string().optional(),
-    locales: z.array(localeTagSchema).optional(),
-    statuses: z.array(z.enum(['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'STALE'])).default(['APPROVED']),
-    since_revision: z.union([z.string(), z.number()]).optional(),
-    include_drafts: z.boolean().default(false),
-    limit: z.number().int().positive().max(2000).default(500),
-  }),
-  preview_apply: z.object({
-    project_id: z.string().optional(),
-    change_ids: z.array(z.string()).optional(),
-    dry_run: z.boolean().default(true),
-    create_backup: z.boolean().default(true),
-    include_drafts: z.boolean().default(false),
-  }),
-  apply_translation_updates: z.object({
-    apply_plan_id: z.string().min(1),
-    confirm: z.boolean().default(false),
-    require_clean_worktree: z.boolean().default(false),
-    create_backup: z.boolean().default(true),
-  }),
-  validate_localization_files: z
-    .object({
-      file_set_ids: z.array(z.string()).optional(),
-      check_placeholders: z.boolean().default(true),
-      check_duplicates: z.boolean().default(true),
-      check_missing: z.boolean().default(true),
-    })
-    .default({}),
-  get_sync_status: z.object({
-    project_id: z.string().optional(),
-    include_conflicts: z.boolean().default(true),
-  }),
-  resolve_sync_conflict: z.object({
-    conflict_id: z.string().min(1),
-    resolution: z.enum(['KEEP_LOCAL', 'KEEP_REMOTE', 'MANUAL_MERGE', 'DEFER']),
-    value: z.string().optional(),
-    note: z.string().optional(),
-  }),
-  report_apply_result: z.object({
-    apply_plan_id: z.string().min(1),
-    git_commit: z.string().nullable().optional(),
-    note: z.string().optional(),
-  }),
-  create_git_patch: z.object({
-    apply_plan_id: z.string().optional(),
-    output_path: z.string().optional(),
-    include_untracked: z.boolean().default(true),
-  }),
-} satisfies Record<LocalMcpTool, z.ZodTypeAny>;
 
 export const remoteToolSchemas = {
   list_projects: z.object({}),

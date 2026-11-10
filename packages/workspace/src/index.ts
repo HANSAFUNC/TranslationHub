@@ -4,9 +4,9 @@ import { ErrorCode, LocaleHubError, globToRegExp, type PlatformName } from '@loc
 import type { FileMappingConfig, LocalConfig } from '@localehub/contracts';
 
 /**
- * Local MCP filesystem boundary (spec §4.2, §10.3).
+ * Filesystem boundary for local write-back (spec §4.2, §10.3).
  *
- * Every path the Local MCP touches goes through this guard. The guard:
+ * Every path the CLI touches goes through this guard. The guard:
  *   1. resolves the path against the workspace root,
  *   2. rejects `..` traversal that leaves the root,
  *   3. resolves symlinks (when the target exists) and re-checks containment,
@@ -126,7 +126,7 @@ export class WorkspaceGuard {
     if (!this.allowWrite.length) {
       throw new LocaleHubError(
         ErrorCode.PATH_NOT_WRITABLE,
-        'workspace.allowWrite is empty: the Local MCP refuses to write any file',
+        'workspace.allowWrite is empty: the CLI refuses to write any file',
         403,
       );
     }

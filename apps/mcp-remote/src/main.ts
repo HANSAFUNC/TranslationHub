@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   app.post('/mcp', async (req: Request, res: Response) => {
     try {
       const actor = await authenticate(req, prisma, tenant);
-      const server = buildRemoteMcpServer(actor, prisma, tenant);
+      const server = await buildRemoteMcpServer(actor, prisma, tenant);
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined, // stateless
         enableJsonResponse: true,

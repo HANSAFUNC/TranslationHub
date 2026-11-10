@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import type { ApplyPlan } from '@localehub/sync-engine';
 
 /**
- * Local MCP state, persisted inside the workspace at `.localehub/state.json`.
+ * Local sync state, persisted inside the workspace at `.localehub/state.json`.
  *
  * It holds only identifiers and hashes — never tokens, never translation payloads beyond the
  * pending apply plans the user has explicitly previewed. Everything here is safe to delete.

@@ -59,13 +59,13 @@ git diff          # 只应包含预期的语言文件条目
 
 ## 4. 在 Claude Code / Cursor 里用
 
-把 `docs/MCP.md` 中的 `.mcp.json` 片段放到仓库根目录，重启客户端，
-然后对 Agent 说：
+把 `docs/MCP.md` 中的 `.mcp.json` 片段放到仓库根目录（只有一条远端条目，不需要在仓库里装东西），
+重启客户端。读写仓库用 CLI，让 Agent 用 Bash 调它：
 
-> 用 localehub-local 扫描这个仓库，先预览同步计划给我看，我确认后再推送。
+> 用 localehub 扫描这个仓库，先预览同步计划给我看，我确认后再推送。
 
-Agent 会依次调用 `get_local_project_info` → `scan_local_project` → `preview_sync`，
-并把计划展示出来；只有你说"确认"之后才会调用 `push_project_changes(confirm=true)`。
+Agent 会依次跑 `localehub info` → `localehub scan` → `localehub sync preview`，
+并把计划展示出来；只有你说"确认"之后才会跑 `localehub sync push --confirm`。
 
 ## 5. 常见问题
 

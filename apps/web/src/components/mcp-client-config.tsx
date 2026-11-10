@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { GitBranch, KeyRound, Plug, Terminal } from 'lucide-react';
+import { KeyRound, Plug, Terminal, TerminalSquare } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -17,8 +17,7 @@ import { ErrorAlert } from '@/components/error-alert';
  * string itself — the address a client needs is a deployment fact the browser cannot know.
  */
 export interface McpClientSnippets {
-  remoteOnly: string;
-  localAndRemote: string;
+  remote: string;
   claudeCli: string;
 }
 
@@ -29,6 +28,9 @@ export interface McpClientSnippets {
  * of the same instructions is how they end up disagreeing. `showTokenStep` is false on the
  * developer page, which is already about issuing tokens.
  *
+ * There is one MCP — the platform's — so there is one MCP card. Local repository work is the
+ * CLI's job, and it is described as such rather than dressed up as an MCP server.
+ *
  * `error` is the fetch's error, if the caller has one to report. Without it a failed request is
  * indistinguishable from a slow one: the caller's page keeps showing the loading shape forever and
  * the reason never reaches the screen. Callers that already surface the same error at page level
@@ -36,12 +38,10 @@ export interface McpClientSnippets {
  */
 export function McpClientConfig({
   snippets,
-  remoteUrl,
   showTokenStep = true,
   error,
 }: {
   snippets: McpClientSnippets | undefined;
-  remoteUrl: string;
   showTokenStep?: boolean;
   error?: unknown;
 }) {
@@ -77,12 +77,14 @@ export function McpClientConfig({
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Plug className="size-4" />
-            Remote MCP（平台侧，无需本地仓库）
+            Remote MCP（平台侧）
           </CardTitle>
-          <CardDescription>只暴露平台数据，不提供任何本地文件能力。可配在任何机器上，只需要 URL 加 Token。</CardDescription>
+          <CardDescription>
+            只暴露平台数据，没有任何本地文件能力。可配在任何机器上，只需要 URL 加 Token；不需要在仓库里装任何东西。
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <CodeBlock code={snippets.remoteOnly} what="Remote MCP 配置" />
+          <CodeBlock code={snippets.remote} what="MCP 配置（.mcp.json）" />
           <div className="flex flex-col gap-2">
             <span className="text-muted-foreground text-xs">或者用 Claude Code 命令直接添加：</span>
             <CodeBlock code={snippets.claudeCli} what="Claude Code 命令" language="bash" />
@@ -93,23 +95,33 @@ export function McpClientConfig({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <GitBranch className="size-4" />
-            Local MCP + Remote MCP（在仓库里两个都用）
+            <TerminalSquare className="size-4" />
+            本地仓库操作（CLI，不是 MCP）
           </CardTitle>
           <CardDescription>
-            Local MCP 通过 stdio 在开发者机器上运行，文件访问受 workspace 白名单约束。把下面的内容存成仓库根目录的{' '}
-            <span className="font-mono">.mcp.json</span>。
+            平台不提供本地 MCP：它够不到你的磁盘，也不该够到。需要扫描、比较或写回文件时在仓库里运行 CLI， 它受{' '}
+            <span className="font-mono">.localehub/config.yaml</span> 的 workspace 白名单约束，写回前有备份与原子写。
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <CodeBlock code={snippets.localAndRemote} what="完整 MCP 配置" />
+          <CodeBlock
+            code={[
+              'localehub scan                  # 扫描语言文件并规范化',
+              'localehub sync preview          # 与平台三方比较，只读',
+              'localehub sync push --confirm   # 推送本地变更',
+              'localehub apply preview         # 回写 dry-run',
+              'localehub apply --confirm       # 原子写回 + 备份',
+              'localehub patch                 # 生成 patch，不 commit',
+            ].join('\n')}
+            what="本地同步命令"
+            language="bash"
+          />
           <Alert variant="warning">
             <Terminal />
-            <AlertTitle>把 Local MCP 的路径换成你自己的</AlertTitle>
+            <AlertTitle>Agent 也能跑这些命令</AlertTitle>
             <AlertDescription>
-              <span className="font-mono text-xs">&lt;path-to-localehub&gt;</span> 要指向这个项目的检出目录； 也可以直接运行{' '}
-              <span className="font-mono text-xs">node apps/cli/dist/bin.js mcp-config --remote {remoteUrl}</span>{' '}
-              生成填好真实路径的版本。
+              Claude Code / Cursor 可以自己读写你的文件；需要平台的三方比较、冲突检测与基线记录时， 让它用 Bash
+              调上面的命令，而不是绕过它们直接改译文——直接改会丢掉冲突检测。
             </AlertDescription>
           </Alert>
         </CardContent>

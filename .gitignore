@@ -12,7 +12,7 @@ env
 localehub.env
 !env.example
 
-# Local MCP runtime artifacts must never be committed
+# Local sync runtime artifacts must never be committed
 .localehub/backups/
 .localehub/cache/
 .localehub/patches/

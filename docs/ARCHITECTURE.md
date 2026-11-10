@@ -4,9 +4,9 @@
 
 ```mermaid
 flowchart LR
-  Agent[Claude Code / Cursor / Codex] -->|stdio| LocalMCP[Local MCP]
-  LocalMCP -->|allowlisted read/write| Repo[Developer Repository]
-  LocalMCP -->|HTTPS REST| API[LocaleHub API]
+  Agent[Claude Code / Cursor / Codex] -->|Bash| CLI[localehub CLI]
+  CLI -->|allowlisted read/write| Repo[Developer Repository]
+  CLI -->|HTTPS REST| API[LocaleHub API]
   Agent -->|Streamable HTTP| RemoteMCP[Remote MCP]
   RemoteMCP --> Domain
   API --> Domain[Domain Services]
@@ -16,24 +16,27 @@ flowchart LR
   Web[Next.js Web] --> API
 ```
 
-**单一业务实现**：REST API、Remote MCP、Local MCP（经由 API）、Worker 与 Web 都调用
+**单一业务实现**：REST API、Remote MCP、CLI（经由 API）、Worker 与 Web 都调用
 `packages/domain` 的同一套服务；不存在三套翻译业务逻辑。
 
 ## 2. 服务划分
 
-| Service | 技术 | 职责 | 网络 |
-|---|---|---|---|
-| nginx | nginx | HTTPS / 网关 | edge + app |
-| web | Next.js 15 + shadcn/ui | 管理后台（Tailwind v4 设计令牌） | app |
-| api | NestJS 10 | REST API `/api/v1` | app + egress |
-| worker | BullMQ | QA 运行、导入导出、通知、AI 任务 | app + egress |
-| mcp-remote | Node + MCP SDK | 平台侧 MCP（Streamable HTTP） | app |
-| postgres | PostgreSQL 16 | 主数据库（RLS） | app only |
-| redis | Redis 7 | 队列 | app only |
+| Service    | 技术                   | 职责                             | 网络         |
+| ---------- | ---------------------- | -------------------------------- | ------------ |
+| nginx      | nginx                  | HTTPS / 网关                     | edge + app   |
+| web        | Next.js 15 + shadcn/ui | 管理后台（Tailwind v4 设计令牌） | app          |
+| api        | NestJS 10              | REST API `/api/v1`               | app + egress |
+| worker     | BullMQ                 | QA 运行、导入导出、通知、AI 任务 | app + egress |
+| mcp-remote | Node + MCP SDK         | 平台侧 MCP（Streamable HTTP）    | app          |
+| postgres   | PostgreSQL 16          | 主数据库（RLS）                  | app only     |
+| redis      | Redis 7                | 队列                             | app only     |
 
-Local MCP **不在**服务端 Compose 中：它是安装在开发者机器 / CI Runner 上的包，因为需要访问
-本地仓库。私有化如需容器化，只能挂载指定仓库目录（只读或受控读写），禁止挂载 `/`、
-Docker socket 或整个 Home。
+CLI **不在**服务端 Compose 中：它装在开发者机器 / CI Runner 上，因为需要访问本地仓库。
+私有化如需容器化（见 DEPLOYMENT.md §5），只能挂载指定仓库目录（只读或受控读写），
+禁止挂载 `/`、Docker socket 或整个 Home。
+
+服务端 Compose 里只有一个 MCP 服务（`mcp-remote`）。平台**不提供**本地 MCP：那样的服务由每个
+开发者的客户端进程各自拉起，版本与能力都无法被平台统一管理。
 
 ## 3. 包依赖方向（无环）
 
@@ -90,11 +93,14 @@ NestJS 模块化：全局 `AuthGuard`（会话 JWT 或 `lh_mcp_*` Token → `Act
 `@RequireRole` / `@RequireScopes` 装饰器、统一响应信封与错误码、`RequestContextMiddleware`
 （request_id + AsyncLocalStorage）、`AuditService`。控制器只做参数校验与编排，业务在 domain。
 
-### 4.7 apps/mcp-local
+### 4.7 apps/cli + packages/local-sync
 
-14 个工具 + 2 个 Resource + 4 个 Prompt。工具实现调用 `WorkspaceGuard` / `SafeFileWriter` /
-`GitClient` / `ApiClient`，并通过 `.localehub/state.json` 串联 preview → push、pull → apply →
-report 的多步流程。`confirm=false` 一律拒绝写操作。
+本地仓库操作：14 个动作（scan / sync preview / sync push / pull / apply / qa / status /
+conflicts / patch / release validate / info / mcp-config）。实现调用 `WorkspaceGuard` /
+`SafeFileWriter` / `GitClient` / `ApiClient`，并通过 `.localehub/state.json` 串联
+preview → push、pull → apply → report 的多步流程。`--confirm` 缺失时一律拒绝写操作。
+
+引擎（`packages/local-sync`）与传输层无关：它不含 MCP 依赖，`apps/cli` 是它唯一的驱动方。
 
 ### 4.8 apps/mcp-remote
 
@@ -116,20 +122,20 @@ report 的多步流程。`confirm=false` 一律拒绝写操作。
 
 ## 5. 横切关注点
 
-| 关注点 | 实现 |
-|---|---|
-| 认证 | 会话 JWT（HS256，12h）或 API/MCP Token（SHA-256 存储） |
-| 授权 | `packages/permissions` 的 `assertRole` / `assertScope` / `assertProjectBound` / `assertLocaleAllowed` |
-| 租户隔离 | 数据库 RLS + 每次查询携带 organization_id |
-| 幂等 | `SyncPlan.confirmedAt` 幂等重放 + `contentHash` 去重 + `Idempotency-Key` |
-| 并发 | `projects.revision` 乐观锁（`REVISION_MISMATCH` 要求重新预览） |
-| 审计 | `audit_logs`（含 request_id、session、client、耗时；自动脱敏） |
-| 错误 | 稳定错误码（`SYNC_PLAN_EXPIRED`、`REVISION_MISMATCH`、`APPLY_REJECTED_STALE_PREVIEW` …） |
-| 观测 | `/health`、`/health/ready`、`/system/queues`、结构化日志 |
+| 关注点   | 实现                                                                                                  |
+| -------- | ----------------------------------------------------------------------------------------------------- |
+| 认证     | 会话 JWT（HS256，12h）或 API/MCP Token（SHA-256 存储）                                                |
+| 授权     | `packages/permissions` 的 `assertRole` / `assertScope` / `assertProjectBound` / `assertLocaleAllowed` |
+| 租户隔离 | 数据库 RLS + 每次查询携带 organization_id                                                             |
+| 幂等     | `SyncPlan.confirmedAt` 幂等重放 + `contentHash` 去重 + `Idempotency-Key`                              |
+| 并发     | `projects.revision` 乐观锁（`REVISION_MISMATCH` 要求重新预览）                                        |
+| 审计     | `audit_logs`（含 request_id、session、client、耗时；自动脱敏）                                        |
+| 错误     | 稳定错误码（`SYNC_PLAN_EXPIRED`、`REVISION_MISMATCH`、`APPLY_REJECTED_STALE_PREVIEW` …）              |
+| 观测     | `/health`、`/health/ready`、`/system/queues`、结构化日志                                              |
 
 ## 6. 为什么这样设计
 
 - **计划哈希 + 服务端重算**：客户端不能"自报变更"，防止绕过预览直接写平台。
-- **App 层三态比较放在纯函数包**：Local MCP 与平台必须得出完全一致的结论，否则计划哈希必然对不上。
+- **App 层三态比较放在纯函数包**：CLI 与平台必须得出完全一致的结论，否则计划哈希必然对不上。
 - **原地补丁而非整体重写**：翻译文件的 diff 必须只包含预期条目，否则代码评审无法信任。
 - **RLS 而非仅应用层过滤**：任何遗漏 `where organizationId` 的查询都不会泄漏数据。

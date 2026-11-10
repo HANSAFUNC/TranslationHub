@@ -8,27 +8,29 @@ Docker 部署。**核心差异化能力是代码仓库与平台之间的双向�
 
 ## 2. 用户与角色
 
-| 角色 | 权限摘要 |
-|---|---|
-| Platform Admin | 平台运营、SaaS 配置、租户管理（跨租户，走特权路径） |
-| Organization Owner / Admin | 组织成员、项目、AI Provider、MCP 客户端、安全策略 |
-| Project Manager | 项目、语言、术语、审核流程、发布管理 |
-| Developer | 连接仓库、导入原文、同步文件、查看问题 |
-| Product Manager | 修改原文/译文、管理上下文、发起审核 |
-| Translator | 编辑被分配语言的译文 |
-| Reviewer | 审核译文、通过或退回 |
-| Readonly | 只读查看授权项目 |
+| 角色                       | 权限摘要                                            |
+| -------------------------- | --------------------------------------------------- |
+| Platform Admin             | 平台运营、SaaS 配置、租户管理（跨租户，走特权路径） |
+| Organization Owner / Admin | 组织成员、项目、AI Provider、MCP 客户端、安全策略   |
+| Project Manager            | 项目、语言、术语、审核流程、发布管理                |
+| Developer                  | 连接仓库、导入原文、同步文件、查看问题              |
+| Product Manager            | 修改原文/译文、管理上下文、发起审核                 |
+| Translator                 | 编辑被分配语言的译文                                |
+| Reviewer                   | 审核译文、通过或退回                                |
+| Readonly                   | 只读查看授权项目                                    |
 
-角色在**服务端**校验；REST API、Remote MCP、Local MCP、Web UI 共用同一套判定逻辑。
+角色在**服务端**校验；REST API、Remote MCP、CLI 与 Web UI 共用同一套判定逻辑。
 
 ## 3. 核心业务流程
 
 ### 3.1 首次连接仓库
-创建项目 → 生成 MCP Token → 在仓库执行 `localehub init` → Local MCP 扫描 → `preview_sync`
-展示变更 → 用户确认 → `push_project_changes` → 平台创建 Key / Source Version / Translation
-Version / Sync Baseline → 返回同步摘要与远端 revision。
+
+创建项目 → 生成 MCP Token → 在仓库执行 `localehub init` → `localehub scan` → `localehub sync
+preview` 展示变更 → 用户确认 → `localehub sync push --confirm` → 平台创建 Key / Source Version /
+Translation Version / Sync Baseline → 返回同步摘要与远端 revision。
 
 ### 3.2 本地更新推送到平台
+
 Git 变化 → `scan_local_project` → Parser/Adapter 规范化 → 内容哈希与基线比较 → `preview_sync`
 → 用户确认 → `push_project_changes` → API 校验权限、版本、幂等键 → Sync Engine upsert →
 原文变化时将依赖旧 Source Version 的译文标记 `STALE` → 保存 Sync Session / Items / Baseline。
@@ -37,6 +39,7 @@ Git 变化 → `scan_local_project` → Parser/Adapter 规范化 → 内容哈�
 文件映射变更。删除必须预览。
 
 ### 3.3 平台修正译文写回仓库
+
 产品经理或翻译在编辑器修改译文 → 保存草稿 → 审核通过（`APPROVED`，产生 `translation.changed`
 事件）→ 开发者执行 `pull_platform_updates` → `preview_apply` 生成 patch（文件、Key、旧值、新值、
 来源版本、审核状态）→ 默认只有 `APPROVED` 可应用 → 用户确认 → `apply_translation_updates`
@@ -69,24 +72,30 @@ flowchart TD
 ## 4. 功能需求
 
 ### 4.1 翻译管理
+
 Key / Namespace / Platform / Locale 维度管理；源文与译文并排编辑；不可变版本历史；
 草稿 → 待审核 → 已审核 → 退回 工作流；过期（STALE）标记；按语言/状态/平台/关键字检索。
 
 ### 4.2 质量中心
+
 内置规则：空译文、占位符不一致、缺译、过期译文、标记不匹配、标点不一致、首尾空白、双空格、
 术语未使用、与源文相同。规则可在项目级启停；可在 API 内同步运行，也可投递 BullMQ 异步运行。
 
 ### 4.3 AI 工作区
+
 Provider 适配器：Anthropic / OpenAI 兼容 / Ollama / 内置离线启发式（默认，无需网络）。
 AI 产出**一律草稿**；AI 审核结果只是建议，不能改变状态、不能绕过人工审核与发布权限。
 
 ### 4.4 术语与翻译记忆
+
 术语库（含目标语言对应词、大小写敏感开关）；翻译记忆（按源文哈希检索，命中计数）。
 
 ### 4.5 仓库同步
-仓库连接、文件映射、Local MCP 心跳与版本、同步历史、同步计划预览、变更详情、冲突处理。
+
+仓库连接、文件映射、CLI 心跳与版本、同步历史、同步计划预览、变更详情、冲突处理。
 
 ### 4.6 发布
+
 发布快照锁定 Key、源文版本、译文版本与内容哈希；发布前校验（`validate_release`）。
 
 ## 5. 非功能需求
@@ -101,13 +110,13 @@ AI 产出**一律草稿**；AI 审核结果只是建议，不能改变状态、�
 
 ## 6. 验收场景
 
-| 场景 | 期望 |
-|---|---|
-| A 本地新增 Key 推送 | 平台可查到 Key、源文、文件路径、commit；同一 commit 重复执行不产生重复版本 |
+| 场景                   | 期望                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| A 本地新增 Key 推送    | 平台可查到 Key、源文、文件路径、commit；同一 commit 重复执行不产生重复版本      |
 | B 平台修复日语译文回写 | 只修改映射的日语文件；文件可重新解析；Git diff 只含预期条目；平台记录已应用版本 |
-| C 两端都修改同一 Key | preview 产生 conflict，不自动选边；解决后产生新版本与新基线 |
-| D 平台存在草稿 | 默认不进入 pull/apply；显式策略与权限允许时才可见，且带风险提示 |
-| E 原文变更 | 生成新 Source Version；依赖旧版本的目标语言标记 STALE；历史保留 |
+| C 两端都修改同一 Key   | preview 产生 conflict，不自动选边；解决后产生新版本与新基线                     |
+| D 平台存在草稿         | 默认不进入 pull/apply；显式策略与权限允许时才可见，且带风险提示                 |
+| E 原文变更             | 生成新 Source Version；依赖旧版本的目标语言标记 STALE；历史保留                 |
 
 以上 A–E 全部由 `apps/e2e-demo/src/run-demo.ts` 与集成测试自动验证。
 

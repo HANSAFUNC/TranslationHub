@@ -135,9 +135,9 @@ importers:
       '@localehub/domain':
         specifier: workspace:*
         version: link:../../packages/domain
-      '@localehub/mcp-local':
+      '@localehub/local-sync':
         specifier: workspace:*
-        version: link:../mcp-local
+        version: link:../../packages/local-sync
       '@localehub/workspace':
         specifier: workspace:*
         version: link:../../packages/workspace
@@ -172,9 +172,9 @@ importers:
       '@localehub/domain':
         specifier: workspace:*
         version: link:../../packages/domain
-      '@localehub/mcp-local':
+      '@localehub/local-sync':
         specifier: workspace:*
-        version: link:../mcp-local
+        version: link:../../packages/local-sync
       '@localehub/workspace':
         specifier: workspace:*
         version: link:../../packages/workspace
@@ -182,6 +182,9 @@ importers:
         specifier: ^0.2.2
         version: 0.2.2
     devDependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.17.0
+        version: 1.32.2(zod@3.25.76)
       '@types/node':
         specifier: ^22.10.2
         version: 22.20.5
@@ -191,40 +194,6 @@ importers:
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.5)(lightningcss@1.33.0)
-
-  apps/mcp-local:
-    dependencies:
-      '@localehub/api-client':
-        specifier: workspace:*
-        version: link:../../packages/api-client
-      '@localehub/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
-      '@localehub/format-adapters':
-        specifier: workspace:*
-        version: link:../../packages/format-adapters
-      '@localehub/sync-engine':
-        specifier: workspace:*
-        version: link:../../packages/sync-engine
-      '@localehub/workspace':
-        specifier: workspace:*
-        version: link:../../packages/workspace
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.17.0
-        version: 1.32.2(zod@3.25.76)
-      zod:
-        specifier: ^3.24.1
-        version: 3.25.76
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.2
-        version: 22.20.5
-      ts-node:
-        specifier: ^10.9.2
-        version: 10.9.2(@types/node@22.20.5)(typescript@5.9.3)
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
 
   apps/mcp-remote:
     dependencies:
@@ -495,6 +464,34 @@ importers:
         specifier: ^2.6.1
         version: 2.9.1
     devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  packages/local-sync:
+    dependencies:
+      '@localehub/api-client':
+        specifier: workspace:*
+        version: link:../api-client
+      '@localehub/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@localehub/format-adapters':
+        specifier: workspace:*
+        version: link:../format-adapters
+      '@localehub/sync-engine':
+        specifier: workspace:*
+        version: link:../sync-engine
+      '@localehub/workspace':
+        specifier: workspace:*
+        version: link:../workspace
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.5
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

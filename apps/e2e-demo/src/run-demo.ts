@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { ApiClient } from '@localehub/api-client';
-import { LocalMcpServices } from '@localehub/mcp-local';
+import { LocalSyncServices } from '@localehub/local-sync';
 import { loadLocalConfig } from '@localehub/workspace';
 import { ensureApi, type ApiHandle } from './api-harness';
 
@@ -12,7 +12,7 @@ import { ensureApi, type ApiHandle } from './api-harness';
  *
  *   1. scan + preview + push a fresh local project to the platform
  *   2. a product manager fixes a wrong Japanese translation on the platform and approves it
- *   3. the Local MCP pulls it, previews the diff (dry run), and after confirmation writes it back
+ *   3. the CLI pulls it, previews the diff (dry run), and after confirmation writes it back
  *   4. the file is re-validated, the apply report is sent, and a second sync reports "unchanged"
  *
  * The demo always runs against a throwaway copy of `demo-app/` so the repository stays clean.
@@ -101,7 +101,7 @@ async function main(): Promise<void> {
   git(WORKSPACE, ['add', '.localehub/config.yaml']);
   git(WORKSPACE, ['commit', '-qm', 'chore: point config at the demo project']);
 
-  const local = new LocalMcpServices({
+  const local = new LocalSyncServices({
     cwd: WORKSPACE,
     env: { ...process.env, LOCALEHUB_TOKEN: issued.token, LOCALEHUB_API_URL: apiUrl } as NodeJS.ProcessEnv,
   });

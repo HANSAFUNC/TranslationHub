@@ -121,7 +121,7 @@ export class TokensController {
   }
 
   /**
-   * Introspection endpoint used by the Local MCP on startup: it validates the token and reports
+   * Introspection endpoint used by the CLI on startup: it validates the token and reports
    * the project, scopes, bound connection and current revision (spec §4.2 validation step 1).
    */
   @Get('mcp/token-info')

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Boxes, GitBranch, Info, Languages, Plug, ScrollText, Sparkles } from 'lucide-react';
+import { Boxes, Info, Languages, Plug, ScrollText, Sparkles } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -26,12 +26,11 @@ interface ToolDescriptor {
 }
 
 interface McpTools {
-  local: ToolDescriptor[];
   remote: ToolDescriptor[];
   resources: string[];
   prompts: string[];
-  /** Externally reachable Remote MCP endpoint, as configured on the server. */
-  remoteUrl: string;
+  /** How a client reads and invokes skills; the API owns these strings, not the browser. */
+  skillDelivery: { indexUri: string; resourceTemplate: string; promptPrefix: string };
   /** Ready-to-paste configs, generated server-side by the same code the CLI uses. */
   snippets: McpClientSnippets;
 }
@@ -43,6 +42,20 @@ interface Skill {
   version: string;
   status: string;
   description: string | null;
+  /**
+   * What a client can reach this row at, computed by the API with the same function the MCP
+   * servers use — `null` when this row is not the one that gets delivered.
+   *
+   * Deliberately not re-derived here: the browser would have to repeat the version comparison and
+   * the status/kind rules, and any disagreement would show as a handle that no server answers.
+   */
+  mcp: { resourceUri: string; promptName: string | null } | null;
+}
+
+/** Why a listed row is not the one a client receives. */
+function notDeliveredReason(skill: Skill): string {
+  if (skill.status !== 'PUBLISHED') return '未发布，客户端不可见';
+  return '被更高版本取代';
 }
 
 function ToolTable({ tools, loading }: { tools?: ToolDescriptor[]; loading: boolean }) {
@@ -78,7 +91,7 @@ export default function McpPage() {
 
   return (
     <>
-      <PageHeader title="MCP 管理" description="Local MCP（stdio，开发者机器）与 Remote MCP（Streamable HTTP，平台侧）严格分离" />
+      <PageHeader title="MCP 管理" description="平台只暴露一个 Remote MCP（Streamable HTTP）；本地仓库操作由 CLI 完成" />
 
       <ErrorAlert error={error} />
 
@@ -86,37 +99,24 @@ export default function McpPage() {
         <Info />
         <AlertTitle>MCP 边界说明</AlertTitle>
         <AlertDescription>
-          Local MCP 可以读写受限制的本地仓库目录；Remote MCP 只暴露平台数据，绝不提供{' '}
-          <span className="font-mono text-xs">read_local_file / write_local_file</span> 这类任意文件工具。
+          平台侧只有一个 Remote MCP，它只提供平台数据，绝不提供{' '}
+          <span className="font-mono text-xs">read_local_file / write_local_file</span> 这类任意文件工具。需要读写你的仓库时用
+          CLI：
+          <span className="font-mono text-xs">localehub scan / sync preview / apply --confirm</span>
+          ，它受 <span className="font-mono text-xs">.localehub/config.yaml</span> 的 workspace 白名单约束。
         </AlertDescription>
       </Alert>
 
-      <Tabs defaultValue="local">
+      <Tabs defaultValue="remote">
         {/* The registry's TabsList is `inline-flex w-fit`, so it keeps its content width when the
-            viewport shrinks — five tabs then push the page 200px wide on a phone. Let it scroll
+            viewport shrinks — four tabs then push the page 200px wide on a phone. Let it scroll
             instead of reflowing, and leave the vendored component untouched. */}
         <TabsList className="max-w-full justify-start overflow-x-auto">
-          <TabsTrigger value="local">Local MCP {data ? `(${data.local.length})` : ''}</TabsTrigger>
           <TabsTrigger value="remote">Remote MCP {data ? `(${data.remote.length})` : ''}</TabsTrigger>
           <TabsTrigger value="config">客户端配置</TabsTrigger>
           <TabsTrigger value="resources">Resources & Prompts</TabsTrigger>
           <TabsTrigger value="skills">Skills {skills ? `(${skills.length})` : ''}</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="local">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <GitBranch className="size-4" />
-                Local MCP 工具
-              </CardTitle>
-              <CardDescription>通过 stdio 在开发者机器上运行，文件访问受 workspace 白名单约束</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ToolTable tools={data?.local} loading={loading} />
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         <TabsContent value="remote">
           <Card>
@@ -134,7 +134,7 @@ export default function McpPage() {
         </TabsContent>
 
         <TabsContent value="config">
-          <McpClientConfig snippets={data?.snippets} remoteUrl={data?.remoteUrl ?? ''} />
+          <McpClientConfig snippets={data?.snippets} />
         </TabsContent>
 
         <TabsContent value="resources" className="grid min-w-0 gap-4 lg:grid-cols-2">
@@ -175,7 +175,11 @@ export default function McpPage() {
                 <Sparkles className="size-4" />
                 Skill 注册表
               </CardTitle>
-              <CardDescription>Skill 不引入新权限；脚本型 Skill 只在隔离环境中运行，从不进入 API 进程</CardDescription>
+              <CardDescription>
+                Skill 通过 MCP 下发给客户端：读 <span className="font-mono text-xs">{data?.skillDelivery.indexUri ?? '…'}</span>{' '}
+                取清单，读 <span className="font-mono text-xs">{data?.skillDelivery.resourceTemplate ?? '…'}</span> 取正文。
+                不引入新权限；脚本型 Skill 只在隔离环境中运行，从不进入 API 进程。
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {skills?.length ? (
@@ -187,24 +191,46 @@ export default function McpPage() {
                       <TableHead>类型</TableHead>
                       <TableHead>版本</TableHead>
                       <TableHead>状态</TableHead>
+                      <TableHead>客户端可见</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {skills.map((skill) => (
-                      <TableRow key={`${skill.slug}-${skill.version}`}>
-                        <TableCell className="font-mono text-xs">{skill.slug}</TableCell>
-                        <TableCell className="text-sm">{skill.name}</TableCell>
-                        <TableCell>
-                          <Badge variant="muted" className="font-mono text-[10px]">
-                            {skill.kind}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{skill.version}</TableCell>
-                        <TableCell>
-                          <StatusBadge status={skill.status} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {skills.map((skill) => {
+                      const handle = skill.mcp;
+                      return (
+                        <TableRow key={`${skill.slug}-${skill.version}`}>
+                          <TableCell className="font-mono text-xs">{skill.slug}</TableCell>
+                          <TableCell className="text-sm">{skill.name}</TableCell>
+                          <TableCell>
+                            <Badge variant="muted" className="font-mono text-[10px]">
+                              {skill.kind}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{skill.version}</TableCell>
+                          <TableCell>
+                            <StatusBadge status={skill.status} />
+                          </TableCell>
+                          <TableCell className="align-top">
+                            {handle ? (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-muted-foreground break-all font-mono text-[11px]">
+                                  {handle.resourceUri}
+                                </span>
+                                {handle.promptName ? (
+                                  <Badge variant="muted" className="w-fit font-mono text-[10px]">
+                                    {handle.promptName}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-muted-foreground text-[11px]">只作为 resource，不注册 prompt</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground text-[11px]">{notDeliveredReason(skill)}</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               ) : (

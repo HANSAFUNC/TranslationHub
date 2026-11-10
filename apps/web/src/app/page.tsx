@@ -170,7 +170,7 @@ export default function DashboardPage() {
               <EmptyState
                 icon={<Boxes />}
                 title="还没有项目"
-                description="创建一个项目，然后在仓库里用 Local MCP 扫描并推送语言文件。"
+                description="创建一个项目，然后在仓库里用 localehub scan 扫描并推送语言文件。"
                 action={
                   <Button asChild>
                     <Link href="/projects">创建项目</Link>
@@ -221,7 +221,7 @@ export default function DashboardPage() {
               <EmptyState
                 icon={<GitBranch />}
                 title="还没有同步记录"
-                description="在仓库里让 Agent 调用 Local MCP 的 scan → preview → push 即可产生记录。"
+                description="在仓库里运行 localehub scan → sync preview → sync push，或让 Agent 用 Bash 调它们。"
               />
             )}
           </CardContent>

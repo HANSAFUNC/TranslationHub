@@ -1,7 +1,7 @@
 import { ErrorCode, LocaleHubError, Role, type McpScope } from '@localehub/contracts';
 
 /**
- * Authorization rules shared by REST API, Remote MCP, Local MCP and the Web UI.
+ * Authorization rules shared by the REST API, the Remote MCP and the Web UI.
  * Keeping them in one package is what makes spec §0.1.7 enforceable: there is exactly
  * one place that decides whether an actor may do something.
  */

@@ -173,7 +173,7 @@ export default function ProjectPage() {
               <EmptyState
                 icon={<MonitorSmartphone />}
                 title="尚未连接仓库"
-                description="在仓库根目录运行 Local MCP 的 scan_local_project，平台会自动注册连接。"
+                description="在仓库根目录运行 localehub scan，平台会自动注册连接。"
               />
             )}
           </CardContent>

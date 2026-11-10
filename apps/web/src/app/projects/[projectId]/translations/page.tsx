@@ -36,7 +36,7 @@ interface ProjectLocales {
 /**
  * Translation editor: source and target side by side, context, version history, QA findings,
  * draft saving and review actions. Approving here is what produces the remote revision the
- * Local MCP pulls (spec §11.4).
+ * CLI pulls (spec §11.4).
  */
 export default function TranslationsPage() {
   const params = useParams<{ projectId: string }>();
@@ -99,7 +99,7 @@ export default function TranslationsPage() {
     <>
       <PageHeader
         title="翻译编辑器"
-        description="原文与译文并排；保存草稿后提交审核，审核通过 Local MCP 才能拉取回写"
+        description="原文与译文并排；保存草稿后提交审核，审核通过 CLI 才能拉取回写"
         actions={
           <Button variant="outline" onClick={() => router.push(`/projects/${projectId}/sync`)}>
             <GitBranch />
@@ -220,7 +220,7 @@ export default function TranslationsPage() {
                 <EmptyState
                   icon={<Languages />}
                   title="没有匹配的条目"
-                  description="先通过 Local MCP 执行 scan → preview → push 导入原文。"
+                  description="先在仓库里执行 localehub scan → sync preview → sync push 导入原文。"
                 />
               </div>
             )}
@@ -317,7 +317,7 @@ export default function TranslationsPage() {
                               entryIds: [detail.entryId],
                               decision: 'APPROVE',
                             }),
-                          '已审核通过：Local MCP 现在可以拉取该译文',
+                          '已审核通过：CLI 现在可以拉取该译文',
                         )
                       }
                       disabled={busy !== null || detail.status === 'APPROVED'}

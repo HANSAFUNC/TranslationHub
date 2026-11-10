@@ -12,7 +12,7 @@
 - **传输与响应头**：`NODE_ENV=production` 下拒绝纯 HTTP 凭据（`INSECURE_TRANSPORT`）；接入 helmet；
   `TRUST_PROXY` 默认关闭，避免伪造 `X-Forwarded-For` 绕过限流。
 - **草稿回写收敛为组织级策略**：`organizations.allow_draft_apply` 默认 `false`，平台侧拒绝
-  `include_drafts`（`POLICY_VIOLATION`），不再由运行在开发者机器上的 Local MCP 决定。
+  `include_drafts`（`POLICY_VIOLATION`），不再由运行在开发者机器上的 CLI 决定。
 - Web 端新增「组织设置 → 同步安全策略」开关与 `GET/PATCH /organization` 接口。
 
 ### 修复
@@ -46,7 +46,8 @@
 - **格式适配器**：JSON（原地 token 补丁）、YAML（保留注释）、iOS `.strings` / `.stringsdict` /
   `.xcstrings`、Android `strings.xml` / `plurals.xml`、PO、XLIFF；含 29 个 round-trip 测试。
 - **本地工作区**：路径白名单与符号链接逃逸防护、配置校验、原子写入与备份回滚、Git 只读集成。
-- **Local MCP**：14 个工具 + 2 资源 + 4 Prompt，stdio；`confirm=false` 拒绝写操作；状态文件串联多步流程。
+- **本地同步（CLI）**：14 个命令，引擎在 `packages/local-sync`（不含 MCP 依赖）；缺 `--confirm`
+  拒绝写操作；状态文件串联多步流程。平台只暴露一个 Remote MCP。
 - **Remote MCP**：15 个平台工具，无状态 Streamable HTTP；不含任何本地文件能力。
 - **REST API**：认证、项目、翻译、同步、Token、QA、AI、术语、TM、Skill、发布、健康检查；
   统一信封与稳定错误码；审计日志自动脱敏；BullMQ 生产者。

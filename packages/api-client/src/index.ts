@@ -9,6 +9,7 @@ import {
   type SyncBaselineSnapshot,
   type SyncPlanPayload,
   type SyncPlanSummary,
+  type SkillSourceRow,
   type SyncSessionSummaryRecord,
 } from '@localehub/contracts';
 
@@ -81,7 +82,7 @@ export interface SyncStatusResponse {
 /**
  * Typed REST client for the LocaleHub API.
  *
- * Used by the Local MCP, the CLI and the e2e demo. It is intentionally thin: all business
+ * Used by the CLI, the e2e demo and the integration suites. It is intentionally thin: all business
  * rules live on the server so that MCP, Web UI and API share one implementation
  * (spec §0.1.7). Every method maps server error codes back into LocaleHubError.
  */
@@ -137,7 +138,7 @@ export class ApiClient {
         headers: {
           authorization: `Bearer ${this.options.token}`,
           'content-type': 'application/json',
-          'user-agent': `${this.options.clientName ?? 'localehub-local-mcp'}/${this.options.clientVersion ?? '0.1.0'}`,
+          'user-agent': `${this.options.clientName ?? 'localehub-cli'}/${this.options.clientVersion ?? '0.1.0'}`,
           ...extraHeaders,
         },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -186,6 +187,11 @@ export class ApiClient {
 
   listMcpTools(): Promise<unknown> {
     return this.request('GET', '/mcp/tools');
+  }
+
+  /** Skills registered for the token's organization (rows, not the delivered form). */
+  listSkills(): Promise<SkillSourceRow[]> {
+    return this.request('GET', '/skills');
   }
 
   /* ---------------------------------------------------------------- project */

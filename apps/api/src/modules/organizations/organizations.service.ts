@@ -61,7 +61,7 @@ export class OrganizationsService {
 
   /**
    * Reject a request that would pull unapproved translations when the organization has not opted
-   * in. Enforced on the platform rather than in the Local MCP: the client runs on a developer
+   * in. Enforced on the platform rather than in the client: the CLI runs on a developer
    * machine and must not be the thing deciding what a policy allows.
    */
   async assertDraftApplyAllowed(actor: ActorContext): Promise<void> {

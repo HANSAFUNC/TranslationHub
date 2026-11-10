@@ -1,6 +1,6 @@
 # 双向同步：基线、三方比较、冲突与安全回写
 
-本文是实现依据，对应 packages/sync-engine、packages/domain/sync.ts、apps/mcp-local。
+本文是实现依据，对应 packages/sync-engine、packages/domain/sync.ts、packages/local-sync。
 
 ## 1. 同步基线（SyncBaseline）
 
@@ -72,9 +72,9 @@
 
 任何决策都**新增版本**，绝不修改历史版本。已解决冲突不能重复解决（`CONFLICT_ALREADY_RESOLVED`）。
 
-## 6. 安全回写（Local MCP）
+## 6. 安全回写（CLI）
 
-`apply_translation_updates` 的执行顺序：
+`localehub apply --confirm` 的执行顺序：
 
 1. 取出 apply 计划，校验存在、未过期、`confirm=true`。
 2. 可选 `require_clean_worktree`（reject dirty tree）。
@@ -95,7 +95,7 @@
 ## 7. 平台增量事件
 
 `project_events` 每次写入都会 `projects.revision + 1`，事件带该 revision。
-Local MCP 用 `since_revision` 游标拉取，漏掉事件可通过游标补拉，不依赖 webhook。
+CLI 用 `since_revision` 游标拉取，漏掉事件可通过游标补拉，不依赖 webhook。
 `projects.revision` 是唯一权威顺序，不使用客户端时间戳。
 
 ## 8. 已实现的自动化测试
@@ -126,6 +126,6 @@ Local MCP 用 `since_revision` 游标拉取，漏掉事件可通过游标补拉�
 - `organizations.allow_draft_apply`，默认 `false`。
 - 关闭时，任何请求草稿状态的调用（`GET /projects/:id/sync/changes?status=DRAFT`、
   `POST /sync/preview` 带 `includeDrafts`）都会被平台以 `POLICY_VIOLATION` 拒绝 —— 判定在**平台侧**，
-  不由运行在开发者机器上的 Local MCP 决定。
+  不由运行在开发者机器上的 CLI 决定。
 - 开启后行为与规格一致：草稿出现在变更列表里，apply 计划附带 `riskWarning`。
 - 开关位置：Web 后台「组织设置 → 同步安全策略」，或 `PATCH /organization/settings`。
