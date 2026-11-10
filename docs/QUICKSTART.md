@@ -15,6 +15,9 @@ pnpm dev:web &             # :3000
 
 浏览器打开 http://localhost:3000 ，用 `demo@localehub.dev` / `demo-password-123` 登录。
 
+`pnpm db:seed` 会创建组织、5 种角色的用户、一个 Demo App 项目与示例译文。Web 端不需要配置 API 地址：
+它默认走同源 `/api/v1`，由 Next 的重写转发到 API（部署时由 nginx 承担同一职责）。
+
 ## 2. 看端到端闭环（不接真实仓库）
 
 ```bash
@@ -36,7 +39,10 @@ node /path/to/localehub/apps/cli/dist/bin.js init \
 # 在平台「开发者 → API / MCP Token」签发一个含 sync.push + translation.apply 的 Token
 export LOCALEHUB_TOKEN="lh_mcp_..."
 
-node /path/to/localehub/apps/cli/dist/bin.js info
+# init 生成的是通用模板，paths 默认指向 `locales/**`。改成你仓库的真实布局，
+# 否则 scan 会报 0 file 并列出 UNMAPPED_FILE —— 它不会猜你的目录结构。
+node /path/to/localehub/apps/cli/dist/bin.js info      # 看 mappings 解析成了什么
+# 编辑 .localehub/config.yaml: files[].paths 与 workspace.allowWrite
 node /path/to/localehub/apps/cli/dist/bin.js scan
 node /path/to/localehub/apps/cli/dist/bin.js sync preview
 node /path/to/localehub/apps/cli/dist/bin.js sync push --confirm
@@ -63,13 +69,16 @@ Agent 会依次调用 `get_local_project_info` → `scan_local_project` → `pre
 
 ## 5. 常见问题
 
-| 现象 | 原因 / 处理 |
-|---|---|
-| `CONFIG_INVALID: No .localehub/config.yaml found` | 在仓库根目录执行 `localehub init`，或用 `--workspace` 指定路径 |
-| `INVALID_TOKEN`：Environment variable LOCALEHUB_TOKEN is empty | 导出 Token；配置里的 `tokenEnv` 可改名 |
-| `PATH_NOT_WRITABLE` | 目标路径不在 `workspace.allowWrite` 或不在 `files` 映射内 |
-| `SYNC_PLAN_EXPIRED` | 预览超过 30 分钟（`SYNC_PLAN_TTL_SECONDS`），重新 `preview_sync` |
-| `REVISION_MISMATCH` | 预览后平台被别人改过，重新预览 |
-| `APPLY_REJECTED_STALE_PREVIEW` | 预览后本地文件被改过，重新 `preview_apply` |
-| `NOT_APPROVED` 条目 | 平台译文没有审核通过；让审核人批准，或显式 `include_drafts` |
-| `SCOPE_INSUFFICIENT` | Token 缺少 `sync.push` 或 `translation.apply`；重新签发 |
+| 现象                                                           | 原因 / 处理                                                                               |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `CONFIG_INVALID: No .localehub/config.yaml found`              | 在仓库根目录执行 `localehub init`，或用 `--workspace` 指定路径                            |
+| `INVALID_TOKEN`：Environment variable LOCALEHUB_TOKEN is empty | 导出 Token；配置里的 `tokenEnv` 可改名                                                    |
+| `PATH_NOT_WRITABLE`                                            | 目标路径不在 `workspace.allowWrite` 或不在 `files` 映射内                                 |
+| `SYNC_PLAN_EXPIRED`                                            | 预览超过 30 分钟（`SYNC_PLAN_TTL_SECONDS`），重新 `preview_sync`                          |
+| `REVISION_MISMATCH`                                            | 预览后平台被别人改过，重新预览                                                            |
+| `APPLY_REJECTED_STALE_PREVIEW`                                 | 预览后本地文件被改过，重新 `preview_apply`                                                |
+| `NOT_APPROVED` 条目                                            | 平台译文没有审核通过；让审核人批准，或显式 `include_drafts`                               |
+| `POLICY_VIOLATION`（`allowDraftApply`）                        | 组织未开启草稿回写。到「组织设置 → 同步安全策略」开启，或 `PATCH /organization/settings`  |
+| `RATE_LIMITED`                                                 | 触发了限流；响应头 `Retry-After` 给出等待秒数                                             |
+| `CSRF_VERIFICATION_FAILED`                                     | 用 Cookie 认证的写请求缺少 `X-CSRF-Token`。脚本请改用 Bearer Token，不要复用浏览器 Cookie |
+| `SCOPE_INSUFFICIENT`                                           | Token 缺少 `sync.push` 或 `translation.apply`；重新签发                                   |

@@ -93,7 +93,15 @@ async function main(): Promise<void> {
         `scanned ${result.filesScanned} file(s), ${result.entriesFound} entr(ies), locales: ${(result.locales as string[]).join(', ')}\n`,
       );
       if ((result.errors as unknown[]).length) process.stdout.write(`errors: ${JSON.stringify(result.errors)}\n`);
-      if ((result.warnings as unknown[]).length) process.stdout.write(`warnings: ${(result.warnings as unknown[]).length}\n`);
+      // Print the warnings themselves, not just how many there were: when a scan matches no files
+      // they are the only thing that explains why.
+      if ((result.warnings as unknown[]).length) process.stdout.write(`warnings: ${JSON.stringify(result.warnings)}\n`);
+      if (result.filesScanned === 0) {
+        process.stdout.write(
+          'no files matched. Check the `files[].paths` globs in .localehub/config.yaml against this ' +
+            'repository layout (run `localehub info` to see the mappings as parsed).\n',
+        );
+      }
       return;
     }
     case 'sync': {
