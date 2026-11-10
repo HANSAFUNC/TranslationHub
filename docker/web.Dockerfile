@@ -15,6 +15,13 @@ COPY tsconfig.base.json ./
 COPY packages/contracts ./packages/contracts
 COPY apps/web ./apps/web
 ENV NEXT_TELEMETRY_DISABLED=1
+# `rewrites()` runs at build time and its destination is baked into routes-manifest.json, so the
+# address the web container proxies `/api/v1` to has to be decided here. Setting
+# API_BASE_URL_INTERNAL only in the runtime environment looks like it works — the container starts
+# and every HTML route still returns 200 — but the proxy keeps a destination of localhost:3001,
+# which inside the container is the web container itself, and every API call 500s.
+ARG API_BASE_URL_INTERNAL=http://localhost:3001/api/v1
+ENV API_BASE_URL_INTERNAL=$API_BASE_URL_INTERNAL
 RUN pnpm --filter @localehub/web build
 
 FROM base AS runtime

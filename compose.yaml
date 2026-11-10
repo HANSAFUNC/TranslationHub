@@ -50,6 +50,17 @@ services:
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:3001/api/v1}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # What the Web UI and `localehub mcp-config` tell clients to connect to. The MCP client
+      # runs on a developer's machine, so it must be an address reachable from there — not the
+      # in-network `mcp-remote:3003`.
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-http://localhost:3003/mcp}
+      # This stack is plain HTTP on localhost and nothing terminates TLS for it. NODE_ENV is
+      # `production` here (that is what makes the images behave like the deployed ones), so
+      # without this opt-in every authenticated request would be refused with
+      # INSECURE_TRANSPORT: pages would load and login would succeed, then nothing else would
+      # work. The production overlay sets it back to "false" explicitly, because Compose merges
+      # environment maps and a value only set here would otherwise be inherited there.
+      ALLOW_INSECURE_HTTP: "true"
     ports:
       - "3001:3001"
     depends_on:
@@ -107,12 +118,17 @@ services:
     build:
       context: .
       dockerfile: docker/web.Dockerfile
+      args:
+        # Bake-time, not runtime: Next writes the rewrite destination into the build. See the
+        # Dockerfile for what a runtime-only value silently does.
+        API_BASE_URL_INTERNAL: http://api:3001/api/v1
     restart: unless-stopped
     environment:
+      # The browser calls its own origin (`/api/v1`) and the rewrite above forwards to the API,
+      # so no origin needs configuring here; NEXT_PUBLIC_API_BASE_URL would have to be a build
+      # arg to have any effect at all, and setting it at runtime does nothing.
       NODE_ENV: production
       PORT: "3000"
-      API_BASE_URL_INTERNAL: http://api:3001/api/v1
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001/api/v1}
     ports:
       - "3000:3000"
     depends_on:

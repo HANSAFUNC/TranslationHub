@@ -7,12 +7,15 @@
 #   - PostgreSQL and Redis are not published to the host
 #   - all images are pinned by digest-ready tags and run read-only with resource limits
 #   - nginx terminates TLS in front of web/api
+#
+# Ports are cleared with `!reset []`, not `ports: []`: Compose ignores an empty list in an
+# override file and the base service keeps publishing its host port.
 
 name: localehub
 
 services:
   postgres:
-    ports: []
+    ports: !reset []
     environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     secrets:
@@ -32,7 +35,7 @@ services:
       - log_min_duration_statement=2000
 
   redis:
-    ports: []
+    ports: !reset []
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "/run/secrets/redis_password"]
     secrets:
       - redis_password
@@ -45,6 +48,21 @@ services:
       AUTH_SECRET_FILE: /run/secrets/auth_secret
       ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
       LOG_LEVEL: info
+      # nginx terminates TLS in front of this stack, so the guard stays on. It has to be stated
+      # here: environment maps merge, so `ALLOW_INSECURE_HTTP: "true"` from compose.yaml would
+      # otherwise follow the API into production.
+      ALLOW_INSECURE_HTTP: "false"
+      # One proxy in front. Express otherwise reports the socket address — nginx — as the client,
+      # so every caller would share one rate-limit bucket and one audit identity.
+      TRUST_PROXY: "1"
+      # Public address of the Remote MCP behind nginx; the Web UI shows this to clients.
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-https://localhost/mcp}
+      # Likewise the address the Local MCP is told to call: it runs on a developer's machine, so
+      # the inherited `http://localhost:3001` would point at the developer's own laptop.
+      API_BASE_URL: ${API_BASE_URL:-https://localhost/api/v1}
+      # The browser is served by nginx on the same host, so the cookie-authenticated writes it
+      # sends have that origin.
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost}
     secrets:
       - database_url
       - redis_url
@@ -53,6 +71,10 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # nginx is the only entry point, and these run two replicas: a published host port would be
+    # both unnecessary and impossible to bind twice (`Bind for 0.0.0.0:3001 failed: port is
+    # already allocated`), so the second replica would never start.
+    ports: !reset []
     deploy:
       replicas: 2
       resources:
@@ -90,6 +112,8 @@ services:
       - database_url
       - auth_secret
       - encryption_key
+    # Reachable through nginx only; nothing should reach it directly from the host.
+    ports: !reset []
     deploy:
       resources:
         limits:
@@ -99,7 +123,9 @@ services:
   web:
     environment:
       NODE_ENV: production
-      API_BASE_URL_INTERNAL: http://api:3001/api/v1
+      # The address the rewrite proxies to is a build arg (see docker/web.Dockerfile), inherited
+      # from compose.yaml; setting it here would look right and do nothing.
+    ports: !reset []
     deploy:
       replicas: 2
       resources:
