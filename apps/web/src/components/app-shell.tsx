@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Sun,
   TriangleAlert,
+  UsersRound,
   LogOut,
   Languages,
 } from 'lucide-react';
@@ -50,6 +51,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     group: '项目管理',
     items: [
       { href: '/projects', label: '所有项目', icon: Boxes },
+      { href: '/settings/members', label: '组织成员', icon: UsersRound },
       { href: '/settings/organization', label: '组织设置', icon: Building2 },
     ],
   },

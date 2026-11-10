@@ -215,6 +215,49 @@ resource 没有 prompt；prompt 名统一加 `skill-` 前缀。
 Server 与 `/mcp/tools` 从同一处取，并有集成测试断言「声明的每一条都真的注册了」——那条
 `localehub://projects/{projectId}` 及其 4 个子资源从未被任何 Server 实现，已从声明中移除。
 
+### 1.14 用户管理：组织内建号、分配角色（本轮新增）
+
+此前**没有任何用户管理能力**：`POST /auth/register` 只在实例无用户时可用，`POST /projects/:id/members`
+要求账号已经存在，于是除首个管理员外，任何人都无法创建账号。设置页只有一张角色说明表。
+
+现在补全为「管理员在组织内直接建号」——不做邀请、不开放外部注册（用户明确要求）：
+
+| 能力     | 位置                                                           | 说明                                                         |
+| -------- | -------------------------------------------------------------- | ------------------------------------------------------------ |
+| 成员列表 | `GET /organization/members`                                    | 含组织角色、各项目角色与 `localeScope`、最近登录             |
+| 建号     | `POST /organization/members`                                   | 邮箱 + 姓名 + 初始密码 + 角色；邮箱已存在时只挂组织关系      |
+| 改角色   | `PATCH /organization/members/:userId`                          | 组织级角色                                                   |
+| 移出组织 | `DELETE /organization/members/:userId`                         | 同时删除其项目角色，避免重新加入时恢复旧权限                 |
+| 重置密码 | `POST /organization/members/:userId/password`                  | 无邮件通道，由管理员转达                                     |
+| 项目角色 | `PUT/DELETE /organization/members/:userId/projects/:projectId` | 单项目角色 + 语言范围                                        |
+| 页面     | `/settings/members`                                            | 列表内联改角色、项目角色增删、建号对话框、重置密码、移出组织 |
+
+五条提权守卫抽出到 `packages/permissions`（`assertCanManageMembers` / `assertCanGrantOrgRole` /
+`assertCanManageMember`），11 个单元测试逐条钉住：不能授予高于自己的角色、不能修改高于自己的成员、
+不能动自己、不能移除最后一个所有者、MCP Token 不能管理成员。
+
+**其中一条是真实的账号接管面**：`POST /organization/members` 对已存在的邮箱**绝不复写密码**。若照搬
+「按邮箱添加并设置密码」的常见写法，任何组织管理员都能用自选密码接管平台上任意账号。集成测试专门
+验证：管理员用自选密码「添加」一个已有账号后，原密码仍可登录、管理员给的密码不能登录。
+
+`users` 表没有 RLS（人可属于多个组织，没有 `organization_id` 列），所以所有用户读取都以
+**RLS 保护的 `memberships` 查询返回的 id** 为键；按邮箱查人是特权读取，与登录同一例外，且仅此一处。
+
+验证：21 个集成测试（真库 + 真 API）覆盖列表/建号/登录/重复成员/密码规则/提权守卫/项目角色/移除后
+清理/重置密码；无头 Chrome 实测 `/settings/members` 渲染 6 名成员、导航可进入、建号对话框字段正确、
+真实提交后表格出现新成员且该账号能用所填密码登录、桌面与 390px 均无横向溢出。
+
+### 1.15 `POST /projects` 的角色校验从未生效（本轮发现并修复）
+
+与 §1.11 同一类：guard 只在路由带 `projectId` 时应用 `@RequireRole`，而 `POST /projects` 既无
+path 参数、body 里的 `projectId` 也不是自己，handler 与服务层都没有补 `assertRole`。结果是
+**任何成员（含 READONLY）都能在组织里创建项目**——我先用真实会话复现（201 + 项目落库），再修，
+再把它写进集成测试：READONLY 与 DEVELOPER 均返回 403 `ROLE_INSUFFICIENT`，且断言项目**没有被**
+写进去（只断言状态码会漏掉「返回 403 但其实已经写进去了」）。
+
+顺带审计了其余 `@RequireRole` 路由：`/organization/overview` 只返回计数、`/system/queues` 是刻意
+`@Public()` 供探针使用、`/organization/settings` 在 service 内自查角色，均无同类缺口。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -229,7 +272,7 @@ Server 与 `/mcp/tools` 从同一处取，并有集成测试断言「声明的�
 | 发布快照导出为实际文件包                            | 部分       | 快照入库与校验和字段存在，未打包导出                                                                                                                                                                                                                                                                                                                                                    |
 | Webhook 事件推送                                    | **未实现** | 目前依赖 `since_revision` 游标拉取                                                                                                                                                                                                                                                                                                                                                      |
 | 多组织切换 UI                                       | 部分       | API 支持 `switch-organization`，UI 只展示列表                                                                                                                                                                                                                                                                                                                                           |
-| 用户管理 UI（邀请/改角色）                          | 部分       | API `POST /projects/:id/members` 存在，UI 未提供表单                                                                                                                                                                                                                                                                                                                                    |
+| 用户管理（建号 / 角色 / 项目角色）                  | **已完成** | 无邀请、无自助注册：管理员在 `/settings/members` 直接建号（邮箱+姓名+初始密码+角色）、改组织角色、分配项目角色与语言范围、重置密码、移出组织。API 与守卫见 §1.14                                                                                                                                                                                                                        |
 | 前端单元测试                                        | **未实现** | 仓库里没有 Playwright / RTL 用例，也没有进 CI 的浏览器测试。人工验证用无头 Chrome（CDP）脚本，判定标准是「页面出现真实数据且无错误提示」，不是 HTTP 200——后者在 API 全挂时依然成立，本文件 §1.10 就是这么被骗过一次的                                                                                                                                                                   |
 | Docker 镜像与整套 compose 栈                        | **已完成** | `docker compose up -d --build` 起全套（postgres / redis / api / worker / mcp-remote / web）。无头 Chrome 实测 24/24：登录后首页、9 条路由与两张项目详情页都渲染出真实数据（不是只 HTTP 200），`/mcp`「客户端配置」三个片段可渲染可复制，桌面与 390px 均无横向溢出；Remote MCP 用 SDK 客户端握手 15 个工具，本地文件类工具未暴露。**过程中发现并修掉两个只在容器里出现的缺陷，见 §1.10** |
 | i18n Adapter：JSON 数组/ICU AST                     | 部分       | ICU 复数以字符串形式保存，非 AST 级编辑                                                                                                                                                                                                                                                                                                                                                 |
@@ -264,8 +307,8 @@ Server 与 `/mcp/tools` 从同一处取，并有集成测试断言「声明的�
 pnpm -r build                     # 全部 packages + apps 编译通过
 pnpm --filter @localehub/web exec next build   # 15 条路由构建成功
 pnpm -r typecheck                              # 16 个 workspace 项目全部通过
-pnpm test                                      # 114 unit tests passed
-pnpm test:integration                          # 37 integration tests passed（14 验收 + 12 安全 + 11 Skill 下发）
+pnpm test                                      # 125 unit tests passed
+pnpm test:integration                          # 58 integration tests passed（14 验收 + 12 安全 + 11 Skill 下发 + 21 成员管理）
 node apps/e2e-demo/dist/run-demo.js            # ALL ACCEPTANCE CHECKS PASSED（A–E）
 docker compose config                          # valid
 docker compose -f compose.yaml -f compose.production.yaml config   # valid
@@ -282,6 +325,8 @@ curl -o /dev/null -w %{http_code} /login 等     # 8 个页面均 200
 curl /api/v1/mcp/tools | jq '.data \| keys'    # ["prompts","remote","remoteUrl","resources","skillDelivery","snippets"]，无 local
 node apps/cli/dist/bin.js mcp-config           # 向平台问自己的地址，输出单条 localehub-remote 配置
 cd .demo-workspace && node …/bin.js info|scan|sync preview   # 本地链路走通（scan 2 文件 / 6 条目）
+POST /organization/members (READONLY)          # 无 token 管理成员的越权尝试 → 403（§1.15 修复前后各跑一次）
+无头 Chrome 驱动 /settings/members             # 建号对话框真实提交 → 表格出现新成员 → 该账号用所填密码登录成功
 ```
 
 ## 5. 建议的后续优先级
@@ -307,8 +352,8 @@ cd .demo-workspace && node …/bin.js info|scan|sync preview   # 本地链路走
 | GitHub Actions `CI`（main）                      | **通过**（Run 5）                       |
 | Local / Remote MCP 真实客户端握手                | 通过（见附二）                          |
 | 端到端演示连续两次运行                           | 均通过（demo 自带项目清理，可重复执行） |
-| `pnpm test`                                      | 123 passed                              |
-| `pnpm test:integration`                          | 37 passed                               |
+| `pnpm test`                                      | 125 passed                              |
+| `pnpm test:integration`                          | 58 passed                               |
 | `node apps/e2e-demo/dist/run-demo.js`            | ALL ACCEPTANCE CHECKS PASSED            |
 | `docker compose config`（含 production overlay） | valid                                   |
 | `docker compose up -d --build`（整套栈）         | 5 个服务全部起，浏览器实测 24/24        |
@@ -357,26 +402,27 @@ docker build -f docker/web.Dockerfile -t localehub-web:local .
 
 ## 附三：本次交付中发现并修复的问题
 
-| 问题                                                                     | 影响                                               | 修复                                                               |
-| ------------------------------------------------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------ |
-| 归档动作映射颠倒（`ARCHIVE_CANDIDATE` / `REMOTE_ARCHIVE_CANDIDATE`）     | 本地删除会被误判为远端删除                         | 交换两处返回值并补分支测试                                         |
-| YAML 补丁丢失注释                                                        | 回写会破坏 YAML 文件注释                           | 改用 `yaml` 的 Document API                                        |
-| JSON 新增嵌套 Key 时空节点不存在                                         | 新增 Key 报错                                      | 递归创建中间对象                                                   |
-| JSON 插入点落在收尾换行之后                                              | 生成非法 JSON（逗号独占一行）                      | 插入点回退到末尾空白之前                                           |
-| 认证查询未走特权路径                                                     | RLS 导致登录/Token 校验查不到 membership           | 统一走 `withoutTenantScope`                                        |
-| `getChanges` 用 `array_contains` 过滤 JSON 字符串                        | 平台变更永远拉不到                                 | 移除 SQL 过滤，改为应用层按 locale 过滤                            |
-| 新版本未清空 `applied_to_repo_at`                                        | 已应用的条目标记污染新版本，pull 过滤掉真实变更    | 仅仓库推送才标记为已应用                                           |
-| 冲突解决写回使用扁平字段缺失                                             | 解决冲突后平台值不更新                             | 补齐 `baseValue/localValue/remoteValue`                            |
-| 冲突解决的 Key 查询忽略 namespace                                        | 带 namespace 的项目无法写回                        | 通过 namespace 行再查 Key                                          |
-| Remote MCP 返回数组作为 `structuredContent`                              | MCP 客户端报 `-32602`                              | 两个 MCP 服务端统一包装为 `{items}`                                |
-| `apps/mcp-remote` 缺少 `reflect-metadata`                                | 远程 MCP 无法启动                                  | 补依赖                                                             |
-| AuthGuard 把 `params.id` 当 projectId                                    | 项目级成员（组织角色为 READONLY）被误拒            | 仅在路由确有 projectId 时做项目级角色判断，其余由服务层显式断言    |
-| 缺少 `DELETE /projects/:id`                                              | 无法清理项目，演示不可重复                         | 新增删除端点（需 `confirmName` 二次确认）                          |
-| Dockerfile 在 `prisma generate` 前编译 database 包                       | 镜像构建失败                                       | 调整构建顺序                                                       |
-| Docker runtime 阶段只拷贝部分目录                                        | 容器内 `MODULE_NOT_FOUND`                          | 拷贝完整构建产物                                                   |
-| Web 容器用 corepack 启动 pnpm                                            | 启动时联网下载 pnpm 导致启动失败                   | 直接执行 next                                                      |
-| Web 容器 `next start` 工作目录为 `/app`                                  | 找不到 `.next`，容器无法启动                       | 运行时 `WORKDIR /app/apps/web`                                     |
-| `LOCALEHUB_API_URL` 覆盖被静默丢弃                                       | 所有调用方都在和 config 文件里的地址通信           | 移到 `LocalSyncServices.config()`（见 §1.12）                      |
-| 去掉 Local MCP（用户决定）                                               | 两个 MCP 意味着版本/能力无法统一管理，发现接口失真 | 删除 `apps/mcp-local`；引擎移到 `packages/local-sync`，由 CLI 驱动 |
-| `/mcp/tools` 声明了 6 条未实现的 resource 与 1 个已删除 Server 的 prompt | 发现接口高估能力                                   | 资源/prompt 清单进契约，集成测试断言「声明 == 实际注册」           |
-| 浏览器端硬编码 API 主机                                                  | 反向代理部署下前端打不到 API                       | 未配置 `NEXT_PUBLIC_API_BASE_URL` 时回退到同源 `/api/v1`           |
+| 问题                                                                     | 影响                                               | 修复                                                                           |
+| ------------------------------------------------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 归档动作映射颠倒（`ARCHIVE_CANDIDATE` / `REMOTE_ARCHIVE_CANDIDATE`）     | 本地删除会被误判为远端删除                         | 交换两处返回值并补分支测试                                                     |
+| YAML 补丁丢失注释                                                        | 回写会破坏 YAML 文件注释                           | 改用 `yaml` 的 Document API                                                    |
+| JSON 新增嵌套 Key 时空节点不存在                                         | 新增 Key 报错                                      | 递归创建中间对象                                                               |
+| JSON 插入点落在收尾换行之后                                              | 生成非法 JSON（逗号独占一行）                      | 插入点回退到末尾空白之前                                                       |
+| 认证查询未走特权路径                                                     | RLS 导致登录/Token 校验查不到 membership           | 统一走 `withoutTenantScope`                                                    |
+| `getChanges` 用 `array_contains` 过滤 JSON 字符串                        | 平台变更永远拉不到                                 | 移除 SQL 过滤，改为应用层按 locale 过滤                                        |
+| 新版本未清空 `applied_to_repo_at`                                        | 已应用的条目标记污染新版本，pull 过滤掉真实变更    | 仅仓库推送才标记为已应用                                                       |
+| 冲突解决写回使用扁平字段缺失                                             | 解决冲突后平台值不更新                             | 补齐 `baseValue/localValue/remoteValue`                                        |
+| 冲突解决的 Key 查询忽略 namespace                                        | 带 namespace 的项目无法写回                        | 通过 namespace 行再查 Key                                                      |
+| Remote MCP 返回数组作为 `structuredContent`                              | MCP 客户端报 `-32602`                              | 两个 MCP 服务端统一包装为 `{items}`                                            |
+| `apps/mcp-remote` 缺少 `reflect-metadata`                                | 远程 MCP 无法启动                                  | 补依赖                                                                         |
+| AuthGuard 把 `params.id` 当 projectId                                    | 项目级成员（组织角色为 READONLY）被误拒            | 仅在路由确有 projectId 时做项目级角色判断，其余由服务层显式断言                |
+| 缺少 `DELETE /projects/:id`                                              | 无法清理项目，演示不可重复                         | 新增删除端点（需 `confirmName` 二次确认）                                      |
+| Dockerfile 在 `prisma generate` 前编译 database 包                       | 镜像构建失败                                       | 调整构建顺序                                                                   |
+| Docker runtime 阶段只拷贝部分目录                                        | 容器内 `MODULE_NOT_FOUND`                          | 拷贝完整构建产物                                                               |
+| Web 容器用 corepack 启动 pnpm                                            | 启动时联网下载 pnpm 导致启动失败                   | 直接执行 next                                                                  |
+| Web 容器 `next start` 工作目录为 `/app`                                  | 找不到 `.next`，容器无法启动                       | 运行时 `WORKDIR /app/apps/web`                                                 |
+| `POST /projects` 的角色校验从未生效（任何成员可建项目）                  | 只读成员也能创建项目                               | service 内补 `assertRole(actor,'',PROJECT_MANAGER)` + 集成回归测试（见 §1.15） |
+| `LOCALEHUB_API_URL` 覆盖被静默丢弃                                       | 所有调用方都在和 config 文件里的地址通信           | 移到 `LocalSyncServices.config()`（见 §1.12）                                  |
+| 去掉 Local MCP（用户决定）                                               | 两个 MCP 意味着版本/能力无法统一管理，发现接口失真 | 删除 `apps/mcp-local`；引擎移到 `packages/local-sync`，由 CLI 驱动             |
+| `/mcp/tools` 声明了 6 条未实现的 resource 与 1 个已删除 Server 的 prompt | 发现接口高估能力                                   | 资源/prompt 清单进契约，集成测试断言「声明 == 实际注册」                       |
+| 浏览器端硬编码 API 主机                                                  | 反向代理部署下前端打不到 API                       | 未配置 `NEXT_PUBLIC_API_BASE_URL` 时回退到同源 `/api/v1`                       |

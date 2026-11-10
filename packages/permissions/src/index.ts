@@ -103,6 +103,84 @@ export function assertLocaleAllowed(scope: string[] | undefined, locale: string)
   }
 }
 
+/* ------------------------------------------------------------------ membership */
+
+/**
+ * Member management rules.
+ *
+ * Kept here with the rest of the authorization logic so there is still exactly one place that
+ * decides who may do what. Three of these are privilege-escalation guards rather than
+ * convenience checks, and each has a test:
+ *
+ *   1. you may never hand out a role above your own — otherwise an ORG_ADMIN mints an ORG_OWNER
+ *      and the hierarchy is decorative;
+ *   2. you may never modify a member whose role is above your own — otherwise an ORG_ADMIN
+ *      demotes the owner who appointed them;
+ *   3. an MCP token may never manage members — the same rule as minting tokens: this is an
+ *      interactive act, and a leaked token must not be able to grow its own access.
+ *
+ * The remaining guard (at least one ORG_OWNER must survive) needs the database to evaluate and
+ * lives in the service.
+ */
+
+function weight(role: Role | null | undefined): number {
+  return role ? ROLE_WEIGHT[role] : 0;
+}
+
+export function canManageMembers(actor: ActorContext): boolean {
+  if (actor.isPlatformAdmin) return true;
+  if (actor.kind !== 'user') return false;
+  return weight(actor.orgRole) >= ROLE_WEIGHT[Role.ORG_ADMIN];
+}
+
+export function assertCanManageMembers(actor: ActorContext): void {
+  if (canManageMembers(actor)) return;
+  throw new LocaleHubError(
+    ErrorCode.ROLE_INSUFFICIENT,
+    actor.kind === 'user'
+      ? 'Organization admin or owner is required to manage members'
+      : 'MCP tokens cannot manage organization members',
+    403,
+    { required: Role.ORG_ADMIN },
+  );
+}
+
+/** May `actor` hand out `target` as an organization role? */
+export function canGrantOrgRole(actor: ActorContext, target: Role): boolean {
+  if (actor.isPlatformAdmin) return true;
+  return weight(target) <= weight(actor.orgRole);
+}
+
+export function assertCanGrantOrgRole(actor: ActorContext, target: Role): void {
+  if (canGrantOrgRole(actor, target)) return;
+  throw new LocaleHubError(
+    ErrorCode.ROLE_INSUFFICIENT,
+    `You cannot grant ${target}: it outranks your own organization role`,
+    403,
+    { target, own: actor.orgRole },
+  );
+}
+
+/** May `actor` change or remove a member who currently holds `current`? */
+export function canManageMember(actor: ActorContext, current: Role): boolean {
+  if (actor.isPlatformAdmin) return true;
+  return weight(current) <= weight(actor.orgRole);
+}
+
+export function assertCanManageMember(actor: ActorContext, current: Role): void {
+  if (canManageMember(actor, current)) return;
+  throw new LocaleHubError(
+    ErrorCode.ROLE_INSUFFICIENT,
+    `You cannot modify a member whose role (${current}) outranks your own`,
+    403,
+    { target: current, own: actor.orgRole },
+  );
+}
+
+export function isMemberManagerRole(role: Role | null | undefined): boolean {
+  return weight(role) >= ROLE_WEIGHT[Role.ORG_ADMIN];
+}
+
 export const Permission = {
   PROJECT_READ: Role.READONLY,
   TRANSLATION_EDIT: Role.TRANSLATOR,

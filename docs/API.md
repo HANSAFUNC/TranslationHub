@@ -33,6 +33,33 @@
 | PATCH  | `/organization/settings`    | ORG_OWNER / ORG_ADMIN  | 修改组织安全策略（当前为 `allowDraftApply`） |
 | GET    | `/organization/overview`    | 成员                   | 组织级统计                                   |
 
+### 2.0 组织成员
+
+平台**不开放自助注册**（`/auth/register` 仅在实例没有任何用户时可用，用于首次引导），也没有邀请
+邮件：账号由组织管理员直接创建，再把邮箱与初始密码通过安全渠道交给本人。
+
+| Method | Path                                                | 权限                                   | 说明                                 |
+| ------ | --------------------------------------------------- | -------------------------------------- | ------------------------------------ |
+| GET    | `/organization/members`                             | ORG_OWNER / ORG_ADMIN，或任一项目的 PM | 成员列表，含各人的项目角色           |
+| POST   | `/organization/members`                             | ORG_OWNER / ORG_ADMIN                  | 创建账号或把已有账号挂到本组织       |
+| PATCH  | `/organization/members/:userId`                     | ORG_OWNER / ORG_ADMIN                  | 修改组织角色                         |
+| DELETE | `/organization/members/:userId`                     | ORG_OWNER / ORG_ADMIN                  | 移出组织（同时删除其项目角色）       |
+| POST   | `/organization/members/:userId/password`            | ORG_OWNER / ORG_ADMIN                  | 重置密码（无邮件通道，由管理员转达） |
+| PUT    | `/organization/members/:userId/projects/:projectId` | 该项目 PROJECT_MANAGER 及以上          | 设置项目角色与 `localeScope`         |
+| DELETE | `/organization/members/:userId/projects/:projectId` | 该项目 PROJECT_MANAGER 及以上          | 移除项目角色                         |
+
+五条硬规则（都有测试，见 `packages/permissions/src/__tests__/membership.test.ts`）：
+
+1. **不能授予高于自己的组织角色**——否则 ORG_ADMIN 可以造一个 ORG_OWNER，层级形同虚设；
+2. **不能修改高于自己的成员**——否则 ORG_ADMIN 可以把任命自己的所有者降级；
+3. **不能动自己的组织角色或把自己移出**，且**必须留下至少一个 ORG_OWNER**——否则组织再也没人能管成员；
+4. **MCP Token 不能管理成员**——与「Token 不能签发 Token」同理，泄露的令牌不得自行扩权；
+5. **`POST` 不会修改已有账号的密码**。邮箱已注册时只挂组织成员关系。「按邮箱添加」若顺带写入密码，
+   任何组织管理员都能用自选密码接管平台上的任意账号。
+
+`role` 只会用于创建新账号；`PATCH` 的角色改动**不会**追溯已签发的会话 Token（角色在 Token 里），
+被改角色的人需要重新登录——这是有意的，避免一个已发出的凭据被静默提权。
+
 ### 2.1 两种凭据
 
 | 凭据         | 使用者                    | 传递方式                                                               | 附加要求                                                                      |

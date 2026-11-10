@@ -33,6 +33,12 @@ export class ProjectsService {
     actor: ActorContext,
     input: { name: string; slug?: string; description?: string; sourceLocale: string; defaultPlatform?: string; locales?: string[]; platforms?: string[] },
   ) {
+    // Creating a project carries no `:projectId`, so the guard's `@RequireRole(PROJECT_MANAGER)` on
+    // this route decides nothing on its own — the guard only applies that decorator when the
+    // request names a project. Without the check below, any member (a READONLY included) could
+    // create projects in the organization; verified against the running API. Same trap and same
+    // fix as `POST /skills` and `DELETE /mcp-tokens/:id` (docs/STATUS.md §1.11, §1.14).
+    assertRole(actor, '', Role.PROJECT_MANAGER);
     if (!isValidLocaleTag(input.sourceLocale)) {
       throw new LocaleHubError(ErrorCode.INVALID_LOCALE, `Invalid source locale: ${input.sourceLocale}`, 422);
     }

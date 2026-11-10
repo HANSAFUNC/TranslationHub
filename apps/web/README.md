@@ -6,13 +6,13 @@ Next.js 15 + **shadcn/ui** 管理后台。浏览器通过 `NEXT_PUBLIC_API_BASE_
 
 ## 技术栈
 
-| 项 | 选择 |
-|---|---|
-| 样式 | Tailwind CSS v4（CSS-first，`@theme inline` + CSS 变量） |
-| 组件 | shadcn/ui（style `new-york`，base `radix`，icon `lucide`） |
-| 令牌 | `src/app/globals.css` 的 `:root` / `.dark`；业务代码只用语义色 |
+| 项   | 选择                                                                               |
+| ---- | ---------------------------------------------------------------------------------- |
+| 样式 | Tailwind CSS v4（CSS-first，`@theme inline` + CSS 变量）                           |
+| 组件 | shadcn/ui（style `new-york`，base `radix`，icon `lucide`）                         |
+| 令牌 | `src/app/globals.css` 的 `:root` / `.dark`；业务代码只用语义色                     |
 | 主题 | `ThemeProvider`（light / dark / system，localStorage 持久化 + 首屏内联脚本防闪烁） |
-| 提示 | `sonner`（Radix 项目规范） |
+| 提示 | `sonner`（Radix 项目规范）                                                         |
 
 ## 目录
 
@@ -50,19 +50,20 @@ pnpm --filter @localehub/web build
 
 ## 页面
 
-| 路径 | 内容 |
-|---|---|
-| `/login` | 登录 / 首次部署初始化 |
-| `/` | 工作台：项目、Key、条目、待审核、冲突、最近同步 |
-| `/projects` | 项目列表与新建 |
-| `/projects/[id]` | 项目概览：语言、平台、仓库连接、状态分布 |
-| `/projects/[id]/translations` | 翻译编辑器：原文/译文并排、上下文、版本历史、QA、草稿与审核 |
-| `/projects/[id]/sync` | 仓库连接、心跳、文件映射、同步历史、冲突入口、CLI 操作说明 |
-| `/translations`、`/review`、`/qa` | 全局入口（选择项目后进入） |
-| `/sync`、`/sync/sessions`、`/sync/conflicts` | 同步总览、历史会话、三栏冲突处理 |
-| `/developers/tokens` | API / MCP Token 签发与撤销、`.mcp.json` 示例 |
-| `/mcp` | Local / Remote MCP 工具清单（含 JSON Schema）与 Skill 列表 |
-| `/settings/organization` | 账号、组织、权限模型说明 |
+| 路径                                         | 内容                                                        |
+| -------------------------------------------- | ----------------------------------------------------------- |
+| `/login`                                     | 登录 / 首次部署初始化                                       |
+| `/`                                          | 工作台：项目、Key、条目、待审核、冲突、最近同步             |
+| `/projects`                                  | 项目列表与新建                                              |
+| `/projects/[id]`                             | 项目概览：语言、平台、仓库连接、状态分布                    |
+| `/projects/[id]/translations`                | 翻译编辑器：原文/译文并排、上下文、版本历史、QA、草稿与审核 |
+| `/projects/[id]/sync`                        | 仓库连接、心跳、文件映射、同步历史、冲突入口、CLI 操作说明  |
+| `/translations`、`/review`、`/qa`            | 全局入口（选择项目后进入）                                  |
+| `/sync`、`/sync/sessions`、`/sync/conflicts` | 同步总览、历史会话、三栏冲突处理                            |
+| `/developers/tokens`                         | API / MCP Token 签发与撤销、`.mcp.json` 示例                |
+| `/mcp`                                       | Local / Remote MCP 工具清单（含 JSON Schema）与 Skill 列表  |
+| `/settings/members`                          | 组织成员：建号、组织角色、项目角色、重置密码、移出组织      |
+| `/settings/organization`                     | 组织安全策略与角色说明                                      |
 
 仓库同步页**不会**伪造平台能直接访问开发者机器：所有 scan/push/pull/apply 都明确说明需要
 在本地由 CLI 执行。

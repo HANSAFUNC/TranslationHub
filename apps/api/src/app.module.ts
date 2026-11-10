@@ -25,6 +25,8 @@ import { PlatformController } from './modules/misc/platform.controller';
 import { McpController } from './modules/mcp/mcp.controller';
 import { OrganizationsController } from './modules/organizations/organizations.controller';
 import { OrganizationsService } from './modules/organizations/organizations.service';
+import { UsersController } from './modules/users/users.controller';
+import { UsersService } from './modules/users/users.service';
 
 @Module({
   controllers: [
@@ -39,6 +41,7 @@ import { OrganizationsService } from './modules/organizations/organizations.serv
     PlatformController,
     McpController,
     OrganizationsController,
+    UsersController,
   ],
   providers: [
     PrismaService,
@@ -48,6 +51,7 @@ import { OrganizationsService } from './modules/organizations/organizations.serv
     TranslationsService,
     QaService,
     OrganizationsService,
+    UsersService,
     {
       provide: SyncService,
       useFactory: (prisma: PrismaService) => new SyncService(prisma, prisma.tenant),
