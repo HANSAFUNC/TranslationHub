@@ -121,7 +121,22 @@ Local MCP 提供 14 个工具：`get_local_project_info`、`scan_local_project`�
 `preview_apply`、`apply_translation_updates`、`validate_localization_files`、`get_sync_status`、
 `resolve_sync_conflict`、`report_apply_result`、`create_git_patch`。
 
-Remote MCP（平台侧，Streamable HTTP）提供 15 个平台工具，**不提供任何本地文件读写能力**。
+Remote MCP（平台侧，Streamable HTTP）提供 15 个平台工具，**不提供任何本地文件读写能力**：
+
+```json
+{
+  "mcpServers": {
+    "localehub-remote": {
+      "type": "http",
+      "url": "http://localhost:3003/mcp",
+      "headers": { "Authorization": "Bearer ${LOCALEHUB_TOKEN}" }
+    }
+  }
+}
+```
+
+`node apps/cli/dist/bin.js mcp-config --remote http://localhost:3003/mcp` 会同时生成 local 与 remote
+两段配置。详见 [docs/MCP.md](docs/MCP.md)。
 
 ## 工程结构
 

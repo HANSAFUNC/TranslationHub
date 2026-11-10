@@ -56,11 +56,23 @@ export function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaClient, 
     handler: (input: unknown) => Promise<unknown>,
   ) => void;
 
+  /**
+   * Tools that change platform state. Declaring these as read-only would tell an MCP client the
+   * call cannot modify anything — some clients use that to skip asking the user — so the four
+   * that write drafts, review decisions and submission status must say so.
+   */
+  const WRITE_TOOLS = new Set<string>(['translate_entries', 'review_translation_entries', 'update_translation_draft', 'submit_review']);
+
   const define = <K extends RemoteMcpTool>(name: K, description: string, handler: (input: never) => Promise<unknown>) => {
     const schema = remoteToolSchemas[name] as unknown as { shape?: Record<string, unknown>; _def?: { schema?: { shape?: Record<string, unknown> } } };
+    // None of these destroy anything (versions are immutable, review decisions are reversible), so
+    // `destructiveHint` stays false; they are simply not read-only.
+    const annotations = WRITE_TOOLS.has(name)
+      ? { readOnlyHint: false, destructiveHint: false }
+      : { readOnlyHint: true };
     registerTool(
       name,
-      { description, inputSchema: schema.shape ?? schema._def?.schema?.shape ?? {}, annotations: { readOnlyHint: true } },
+      { description, inputSchema: schema.shape ?? schema._def?.schema?.shape ?? {}, annotations },
       async (input: unknown) => {
         try {
           const result = await handler(input as never);

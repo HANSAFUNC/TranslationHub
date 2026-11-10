@@ -52,8 +52,9 @@ const HELP = `localehub <command>
   patch
       Write a git patch of the current working tree (never commits).
 
-  mcp-config
+  mcp-config [--remote <url>]
       Print the .mcp.json snippet for Claude Code / Cursor / Codex.
+      With --remote, also emit the Remote MCP entry (Streamable HTTP) for that URL.
 
 Exit codes: 0 ok, 1 error, 2 usage error, 3 conflicts or blocked applies.
 `;
@@ -238,25 +239,28 @@ async function main(): Promise<void> {
       return output(services.createGitPatch({ output_path: flags.output as string | undefined }));
     case 'mcp-config': {
       const loaded = loadLocalConfig(workspace);
-      process.stdout.write(
-        `${JSON.stringify(
-          {
-            mcpServers: {
-              'localehub-local': {
-                command: 'node',
-                args: ['<path-to-localehub>/apps/mcp-local/dist/bin.js', '--stdio', '--workspace', '.'],
-                env: {
-                  LOCALEHUB_API_URL: loaded.config.localehub.apiUrl,
-                  LOCALEHUB_WORKSPACE: '.',
-                  LOCALEHUB_TOKEN: `\${${loaded.tokenEnv}}`,
-                },
-              },
-            },
+      const remoteUrl = flags.remote as string | undefined;
+      const servers: Record<string, unknown> = {
+        'localehub-local': {
+          command: 'node',
+          args: ['<path-to-localehub>/apps/mcp-local/dist/bin.js', '--stdio', '--workspace', '.'],
+          env: {
+            LOCALEHUB_API_URL: loaded.config.localehub.apiUrl,
+            LOCALEHUB_WORKSPACE: '.',
+            LOCALEHUB_TOKEN: `\${${loaded.tokenEnv}}`,
           },
-          null,
-          2,
-        )}\n`,
-      );
+        },
+      };
+      if (remoteUrl) {
+        // The remote server is the one that cannot touch a filesystem, so it takes only a URL and
+        // a token — no workspace, no local config.
+        servers['localehub-remote'] = {
+          type: 'http',
+          url: remoteUrl,
+          headers: { Authorization: `Bearer \${${loaded.tokenEnv}}` },
+        };
+      }
+      process.stdout.write(`${JSON.stringify({ mcpServers: servers }, null, 2)}\n`);
       return;
     }
     case 'release': {

@@ -2,13 +2,13 @@
 
 ## 1. 为什么必须分离
 
-| | Local MCP | Remote MCP |
-|---|---|---|
-| 运行位置 | 开发者机器 / CI Runner | LocaleHub 服务端容器 |
-| 传输 | stdio | Streamable HTTP |
-| 能力 | 读取受限仓库目录、生成 patch、原子写回、Git diff | 平台数据与业务（项目、Key、译文、术语、TM、QA、审核、同步状态） |
-| 权限来源 | 本地配置 + `LOCALEHUB_TOKEN` 的 scope | Token 的 scope + 用户角色 |
-| 本地文件 | 受 `workspace` 白名单约束 | **完全没有**（不存在 `read_local_file` / `write_local_file`） |
+|          | Local MCP                                        | Remote MCP                                                      |
+| -------- | ------------------------------------------------ | --------------------------------------------------------------- |
+| 运行位置 | 开发者机器 / CI Runner                           | LocaleHub 服务端容器                                            |
+| 传输     | stdio                                            | Streamable HTTP                                                 |
+| 能力     | 读取受限仓库目录、生成 patch、原子写回、Git diff | 平台数据与业务（项目、Key、译文、术语、TM、QA、审核、同步状态） |
+| 权限来源 | 本地配置 + `LOCALEHUB_TOKEN` 的 scope            | Token 的 scope + 用户角色                                       |
+| 本地文件 | 受 `workspace` 白名单约束                        | **完全没有**（不存在 `read_local_file` / `write_local_file`）   |
 
 平台**无法**主动访问开发者机器：所有"本地动作"都由 Local MCP 在本地发起，平台只记录结果
 （心跳、commit、apply report）。仓库 URL / 分支 / commit **不作为权限依据**。
@@ -26,22 +26,22 @@ node apps/mcp-local/dist/bin.js --stdio [--workspace <path>]
 
 ### 工具
 
-| 工具 | 默认行为 | 说明 |
-|---|---|---|
-| `get_local_project_info` | 只读 | 配置、workspace root、Git 分支/commit、映射、策略、上次同步 |
-| `scan_local_project` | 只读（上传规范化条目） | 扫描配置声明的语言文件；返回文件数/Key 数/Locale/警告 |
-| `read_project_context` | 只读 | 在 `allowRead` 内读取源码上下文，**不默认上传** |
-| `get_remote_project` | 只读 | 平台项目、语言与同步配置 |
-| `preview_sync` | 只读 | 三方比较，生成变更计划 |
-| `push_project_changes` | **必须 `confirm=true`** | 只能提交此前生成且未过期的计划 |
-| `pull_platform_updates` | 只读 | 默认只返回 `APPROVED` |
-| `preview_apply` | dry-run | 逐文件逐 Key 的旧值/新值/风险 |
-| `apply_translation_updates` | **必须二次确认** | 备份 + 原子写入 + 重解析校验 |
-| `validate_localization_files` | 只读 | 格式、占位符、重复 Key、缺译 |
-| `get_sync_status` | 只读 | 本地状态 + 远端状态 + 未解决冲突 |
-| `resolve_sync_conflict` | 显式选择 | `KEEP_LOCAL` / `KEEP_REMOTE` / `MANUAL_MERGE` / `DEFER` |
-| `report_apply_result` | 写审计 | 回报实际写回文件与 commit |
-| `create_git_patch` | 只读 | 生成 patch/diff，**不 commit** |
+| 工具                          | 默认行为                | 说明                                                        |
+| ----------------------------- | ----------------------- | ----------------------------------------------------------- |
+| `get_local_project_info`      | 只读                    | 配置、workspace root、Git 分支/commit、映射、策略、上次同步 |
+| `scan_local_project`          | 只读（上传规范化条目）  | 扫描配置声明的语言文件；返回文件数/Key 数/Locale/警告       |
+| `read_project_context`        | 只读                    | 在 `allowRead` 内读取源码上下文，**不默认上传**             |
+| `get_remote_project`          | 只读                    | 平台项目、语言与同步配置                                    |
+| `preview_sync`                | 只读                    | 三方比较，生成变更计划                                      |
+| `push_project_changes`        | **必须 `confirm=true`** | 只能提交此前生成且未过期的计划                              |
+| `pull_platform_updates`       | 只读                    | 默认只返回 `APPROVED`                                       |
+| `preview_apply`               | dry-run                 | 逐文件逐 Key 的旧值/新值/风险                               |
+| `apply_translation_updates`   | **必须二次确认**        | 备份 + 原子写入 + 重解析校验                                |
+| `validate_localization_files` | 只读                    | 格式、占位符、重复 Key、缺译                                |
+| `get_sync_status`             | 只读                    | 本地状态 + 远端状态 + 未解决冲突                            |
+| `resolve_sync_conflict`       | 显式选择                | `KEEP_LOCAL` / `KEEP_REMOTE` / `MANUAL_MERGE` / `DEFER`     |
+| `report_apply_result`         | 写审计                  | 回报实际写回文件与 commit                                   |
+| `create_git_patch`            | 只读                    | 生成 patch/diff，**不 commit**                              |
 
 Resources：`localehub://local/project-info`、`localehub://local/sync-status`。
 Prompts：`sync-localization-project`、`review-localization-changes`、`fix-translation-issues`、
@@ -63,12 +63,62 @@ Content-Type: application/json
 
 无状态（每个请求自带凭据），因此不存在跨租户的会话泄漏面。
 
+### 3.1 客户端配置
+
+Remote MCP 与本仓库、本地配置**无关**：它只需要一个 URL 和一个 Token，因此可以配在任何地方
+（另一台机器、CI、纯平台侧 Agent）。
+
+生成片段：
+
+```bash
+node apps/cli/dist/bin.js mcp-config --remote http://localhost:3003/mcp
+```
+
+得到：
+
+```json
+{
+  "mcpServers": {
+    "localehub-remote": {
+      "type": "http",
+      "url": "http://localhost:3003/mcp",
+      "headers": { "Authorization": "Bearer ${LOCALEHUB_TOKEN}" }
+    }
+  }
+}
+```
+
+放进 Claude Code / Cursor 的 MCP 配置（项目里的 `.mcp.json` 或用户级配置）并导出
+`LOCALEHUB_TOKEN`，重启客户端即可。
+
+Claude Code 也可以直接用命令行添加：
+
+```bash
+claude mcp add --transport http localehub-remote http://localhost:3003/mcp \
+  --header "Authorization: Bearer $LOCALEHUB_TOKEN"
+```
+
+几个要点：
+
+- **Token 是必须的**，不带 Token 的请求返回 401。用平台「开发者 → Token」签发，scope 按用途选：
+  只读场景给 `project.read` + `translation.read` + `glossary.read`；需要让 Agent 写草稿再给
+  `translation.write`；审核给 `translation.review`。
+- **本地开发不需要配 CORS**：Remote MCP 是给 MCP 客户端直连的，不走浏览器。
+- 生产环境把 URL 换成 nginx 暴露的地址（`location /mcp` → `mcp-remote:3003`，见
+  `docker/nginx/`）。
+- 只支持 `POST /mcp`；`GET /mcp` 返回 405（无状态，没有 SSE 流可订阅）。
+
 工具：`list_projects`、`get_project`、`list_project_locales`、`search_translation_keys`、
 `get_translation_entry`、`get_glossary`、`search_translation_memory`、`translate_entries`、
 `review_translation_entries`、`get_qa_issues`、`update_translation_draft`、`submit_review`、
 `get_project_sync_status`、`get_pending_platform_changes`、`validate_release`。
 
+工具标注（MCP `annotations`）：`translate_entries`、`review_translation_entries`、
+`update_translation_draft`、`submit_review` 声明 `readOnlyHint: false`，其余 11 个为只读。
+客户端据此可以判断哪些调用会改动平台数据。
+
 约束：
+
 - `translate_entries` 只写 **DRAFT**；
 - `review_translation_entries` 需要 `REVIEWER` 角色，且不能批准 `STALE` 译文；
 - 任何工具都不提供本地文件访问。
@@ -81,8 +131,16 @@ Resources / Prompts 清单可通过 `GET /api/v1/mcp/tools` 获取（含 JSON Sc
 {
   "organization_id": "org_uuid",
   "project_ids": ["project_uuid"],
-  "scopes": ["project.read", "repository.scan", "sync.preview", "sync.push",
-             "translation.read", "translation.pull", "translation.apply", "qa.execute"],
+  "scopes": [
+    "project.read",
+    "repository.scan",
+    "sync.preview",
+    "sync.push",
+    "translation.read",
+    "translation.pull",
+    "translation.apply",
+    "qa.execute"
+  ],
   "expires_at": "2026-12-09T00:00:00Z"
 }
 ```
