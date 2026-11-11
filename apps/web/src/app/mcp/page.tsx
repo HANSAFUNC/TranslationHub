@@ -112,9 +112,33 @@ function McpOnboarding({ snippets, remoteUrl }: { snippets?: McpClientSnippets; 
     <div className="flex flex-col gap-4">
       <Alert variant="info">
         <Info />
-        <AlertTitle>四步接入，全部可在浏览器里完成</AlertTitle>
+        <AlertTitle>从零接入：要么给已有项目配 Token，要么让 Agent 从仓库初始化一个</AlertTitle>
         <AlertDescription>平台只有一个 Remote MCP，跑在服务端。不需要在仓库里装任何东西，也不需要本地进程。</AlertDescription>
       </Alert>
+
+      {projects && projects.length === 0 ? (
+        <Step
+          n={0}
+          title="还没有项目？让 Agent 从你的仓库初始化一个"
+          description="你不需要先在网页上建项目。把仓库交给 Agent，它会读本地语言文件、建项目、把内容传上来，并在仓库里留下配置文件。"
+        >
+          <CodeBlock
+            what="对 Agent 说的第一句话"
+            language="bash"
+            code={[
+              '读取这个仓库里的语言文件（locales/**），然后：',
+              '1. 用 create_project 建一个项目，source_locale 用源语言，locales 列出其余语言；',
+              '2. 把读到的内容用 import_translations 上传，先不传 confirm 看一遍会写什么，我确认后再传；',
+              '3. 把返回的 config 写进 .localehub/config.yaml。',
+            ].join('\n')}
+          />
+          <p className="text-muted-foreground text-xs">
+            之后 CLI 就能接手：<code className="bg-muted rounded px-1 font-mono">localehub scan</code> →{' '}
+            <code className="bg-muted rounded px-1 font-mono">localehub sync preview</code>。 平台读不到你的磁盘，所以是 Agent
+            读文件、MCP 收内容——这也是为什么初始化要由 Agent 发起。
+          </p>
+        </Step>
+      ) : null}
 
       <Step
         n={1}

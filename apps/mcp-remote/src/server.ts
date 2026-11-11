@@ -1,10 +1,19 @@
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { PrismaClient } from '@localehub/database';
-import { AiService, SyncService, assertPlaceholdersPreserved, emitProjectEvent, upsertTranslation } from '@localehub/domain';
+import {
+  AiService,
+  SyncService,
+  assertPlaceholdersPreserved,
+  createProject,
+  emitProjectEvent,
+  upsertTranslation,
+} from '@localehub/domain';
+import { renderLocalConfig } from '@localehub/workspace';
 import {
   ErrorCode,
   LocaleHubError,
   Role,
+  contentHash,
   SKILLS_INDEX_URI,
   SKILL_RESOURCE_TEMPLATE,
   renderSkillIndex,
@@ -16,7 +25,7 @@ import {
   type DeliveredSkill,
   type RemoteMcpTool,
 } from '@localehub/contracts';
-import { assertRole, type ActorContext } from '@localehub/permissions';
+import { assertProjectBound, assertRole, type ActorContext } from '@localehub/permissions';
 import { TenantPrisma } from '@localehub/database';
 
 /**
@@ -98,6 +107,8 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
    * that write drafts, review decisions and submission status must say so.
    */
   const WRITE_TOOLS = new Set<string>([
+    'create_project',
+    'import_translations',
     'translate_entries',
     'review_translation_entries',
     'update_translation_draft',
@@ -134,6 +145,146 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
   };
 
   /* ------------------------------------------------------------------- projects */
+
+  define(
+    'create_project',
+    '创建一个项目，并返回可直接写入 .localehub/config.yaml 的配置。用于把本地仓库初始化到平台：' +
+      '先用你自己的文件工具读语言文件，再用 import_translations 上传内容。',
+    async (input: { name: string; source_locale: string; locales?: string[]; platforms?: string[]; description?: string; locales_dir?: string }) => {
+      // Same rule as the REST route: creating a project is a manager act. `assertRole` with an
+      // empty project id checks the organization role, which is what `POST /projects` does too.
+      assertRole(actor, '', Role.PROJECT_MANAGER);
+
+      const created = await tenant.withOrganization(actor.organizationId, (tx) =>
+        createProject(tx, {
+          organizationId: actor.organizationId,
+          userId: actor.userId,
+          name: input.name,
+          description: input.description,
+          sourceLocale: input.source_locale,
+          locales: input.locales,
+          platforms: input.platforms,
+        }),
+      );
+
+      const template = renderLocalConfig({
+        projectId: created.id,
+        projectName: created.name,
+        sourceLocale: created.sourceLocale,
+        locales: created.locales,
+        platforms: created.platforms as never,
+        apiUrl: process.env.API_PUBLIC_URL || 'http://localhost:3001/api/v1',
+        ...(input.locales_dir ? { localesDir: input.locales_dir } : {}),
+      });
+
+      return {
+        project: { id: created.id, name: created.name, slug: created.slug, sourceLocale: created.sourceLocale },
+        // The exact file to write. Returning the text rather than writing it keeps the platform
+        // out of the repository: the agent writes it, with the same tools it reads with.
+        configPath: '.localehub/config.yaml',
+        config: template.yaml,
+        nextSteps: [
+          `把 config 的内容写入 ${'.localehub/config.yaml'}`,
+          'export LOCALEHUB_TOKEN=<你签发的 token>',
+          `用 import_translations 上传内容，project_id=${created.id}`,
+          '然后 localehub scan && localehub sync preview 检查平台与仓库是否一致',
+        ],
+      };
+    },
+  );
+
+  define(
+    'import_translations',
+    '把一批语言文件内容写入项目（建立 Key、源文版本与译文）。用于初始化：先在本地读好文件再上传。' +
+      '不带 confirm=true 时只报告会写入什么。',
+    async (input: {
+      project_id: string;
+      files: { path: string; locale: string; platform: string; namespace?: string; entries: { key: string; value: string }[] }[];
+      confirm: boolean;
+    }) => {
+      assertRole(actor, input.project_id, Role.DEVELOPER);
+      assertProjectBound(actor, input.project_id);
+
+      const project = await tenant.withOrganization(actor.organizationId, (tx) =>
+        tx.project.findUnique({ where: { id: input.project_id }, select: { id: true, name: true, sourceLocale: true } }),
+      );
+      if (!project) throw new LocaleHubError(ErrorCode.NOT_FOUND, `Project ${input.project_id} not found`, 404);
+
+      const entryCount = input.files.reduce((total, file) => total + file.entries.length, 0);
+      const planned = input.files.map((file) => ({
+        path: file.path,
+        locale: file.locale,
+        entries: file.entries.length,
+        isSource: file.locale === project.sourceLocale,
+      }));
+
+      // Dry run by default, like every other write in this codebase.
+      if (!input.confirm) {
+        return {
+          dryRun: true,
+          project: { id: project.id, name: project.name, sourceLocale: project.sourceLocale },
+          files: planned,
+          entryCount,
+          note: 'Nothing was written. Call again with confirm=true to import.',
+        };
+      }
+
+      // The same path the CLI uses: upload a scan, then push the plan it produces. Reusing it means
+      // an import and a repository push cannot produce different platform state.
+      const scanId = `mcp-${Date.now().toString(36)}`;
+      const payload = {
+        projectId: project.id,
+        scanId,
+        client: { name: 'localehub-remote-mcp', version: '0.1.0' },
+        files: input.files.map((file) => ({
+          fileId: `${file.platform}-${file.locale}`,
+          filePath: file.path,
+          locale: file.locale,
+          platform: file.platform,
+          format: 'json',
+          fileHash: contentHash(JSON.stringify(file.entries)),
+          entryCount: file.entries.length,
+        })),
+        entries: input.files.flatMap((file) =>
+          file.entries.map((entry) => ({
+            key: entry.key,
+            namespace: file.namespace ?? '',
+            locale: file.locale,
+            value: entry.value,
+            isSource: file.locale === project.sourceLocale,
+            contentHash: contentHash(entry.value),
+            fileId: `${file.platform}-${file.locale}`,
+            filePath: file.path,
+          })),
+        ),
+      };
+
+      const scan = await sync.recordScan(project.id, payload as never, actor);
+      const preview = await sync.createPreview(
+        {
+          projectId: project.id,
+          connectionId: scan.connectionId,
+          scanId: scan.scanId,
+          direction: 'push',
+          includeDeletes: false,
+          includeDrafts: false,
+        },
+        actor,
+      );
+      const pushed = await sync.push(
+        { syncPlanId: preview.planId, planHash: preview.planHash, client: { name: 'localehub-remote-mcp', version: '0.1.0' } } as never,
+        actor,
+      );
+
+      return {
+        dryRun: false,
+        project: { id: project.id, name: project.name, sourceLocale: project.sourceLocale },
+        files: planned,
+        entryCount,
+        result: { revision: pushed.revision, summary: pushed.summary },
+      };
+    },
+  );
 
   define('list_projects', '列出当前 token 可访问的项目', async () =>
     tenant.withOrganization(actor.organizationId, async (tx) => {

@@ -6,3 +6,4 @@ export * from './qa';
 export * from './ai';
 export * from './webhooks';
 export * from './bundles';
+export * from './projects';

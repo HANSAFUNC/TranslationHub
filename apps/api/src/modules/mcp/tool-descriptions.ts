@@ -1,4 +1,6 @@
 export const REMOTE_TOOL_DESCRIPTIONS: Record<string, string> = {
+  create_project: '创建一个项目，并返回可直接写入 .localehub/config.yaml 的配置（初始化用）',
+  import_translations: '把一批语言文件内容写入项目（初始化用；默认 dry-run，需 confirm=true 才落库）',
   list_projects: '列出当前 token 可访问的项目',
   get_project: '读取项目详情',
   list_project_locales: '读取项目语言列表',

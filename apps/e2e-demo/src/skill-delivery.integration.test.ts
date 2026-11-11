@@ -274,7 +274,7 @@ describe('the registry page agrees with the servers', () => {
 
     // One MCP. A `local` key here would advertise a server that does not exist any more.
     expect(discovery.data).not.toHaveProperty('local');
-    expect(discovery.data!.remote).toHaveLength(15);
+    expect(discovery.data!.remote).toHaveLength(17);
 
     // The advertised lists must match the live server, not a hand-maintained copy of it. This is
     // the assertion that would have caught the six `localehub://projects/...` resources the

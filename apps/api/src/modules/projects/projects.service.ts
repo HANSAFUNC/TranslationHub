@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ErrorCode, LocaleHubError, Role, canonicalizeLocaleTag, isValidLocaleTag } from '@localehub/contracts';
 import { assertRole, type ActorContext } from '@localehub/permissions';
-import { emitProjectEvent } from '@localehub/domain';
+import { createProject, emitProjectEvent, slugify } from '@localehub/domain';
 import { PrismaService } from '../../common/prisma.service';
 
 @Injectable()
@@ -53,42 +53,21 @@ export class ProjectsService {
     if (!isValidLocaleTag(input.sourceLocale)) {
       throw new LocaleHubError(ErrorCode.INVALID_LOCALE, `Invalid source locale: ${input.sourceLocale}`, 422);
     }
-    const slug = input.slug ?? slugify(input.name);
-    return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
-      const project = await tx.project.create({
-        data: {
-          organizationId: actor.organizationId,
-          name: input.name,
-          slug,
-          description: input.description ?? null,
-          sourceLocale: canonicalizeLocaleTag(input.sourceLocale),
-          defaultPlatform: (input.defaultPlatform ?? 'web') as never,
-        },
-      });
-      const locales = new Set([project.sourceLocale, ...(input.locales ?? []).map(canonicalizeLocaleTag)]);
-      for (const code of locales) {
-        await tx.locale.create({
-          data: {
-            organizationId: actor.organizationId,
-            projectId: project.id,
-            code,
-            name: code,
-            isSource: code === project.sourceLocale,
-          },
-        });
-      }
-      for (const platform of new Set(input.platforms ?? [project.defaultPlatform])) {
-        await tx.projectPlatform.create({
-          data: { organizationId: actor.organizationId, projectId: project.id, platform: platform as never },
-        });
-      }
-      await tx.projectMember.upsert({
-        where: { projectId_userId: { projectId: project.id, userId: actor.userId } },
-        create: { organizationId: actor.organizationId, projectId: project.id, userId: actor.userId, role: 'PROJECT_MANAGER' },
-        update: {},
-      });
-      return project;
-    });
+    // Shared with the Remote MCP's `create_project`: one implementation, so a project created by
+    // an agent and one created in the UI cannot differ in locales, platforms or membership.
+    return this.prisma.tenant.withOrganization(actor.organizationId, (tx) =>
+      createProject(tx, {
+        organizationId: actor.organizationId,
+        userId: actor.userId,
+        name: input.name,
+        slug: input.slug,
+        description: input.description,
+        sourceLocale: input.sourceLocale,
+        defaultPlatform: input.defaultPlatform,
+        locales: input.locales,
+        platforms: input.platforms,
+      }),
+    );
   }
 
   async get(actor: ActorContext, projectId: string) {
@@ -231,14 +210,4 @@ export class ProjectsService {
   }
 }
 
-export function slugify(value: string): string {
-  return (
-    value
-      .toLowerCase()
-      .normalize('NFKD')
-      .replace(/[^\w\s-]/g, '')
-      .trim()
-      .replace(/[\s_]+/g, '-')
-      .slice(0, 60) || `project-${Date.now().toString(36)}`
-  );
-}
+export { slugify };

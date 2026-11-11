@@ -26,6 +26,8 @@ export const REMOTE_MCP_RESOURCES = ['localehub://qa-rules'] as const;
 export const REMOTE_MCP_PROMPTS = ['review-localization-changes', 'fix-translation-issues'] as const;
 
 export const REMOTE_MCP_TOOLS = [
+  'create_project',
+  'import_translations',
   'list_projects',
   'get_project',
   'list_project_locales',
@@ -45,6 +47,39 @@ export const REMOTE_MCP_TOOLS = [
 export type RemoteMcpTool = (typeof REMOTE_MCP_TOOLS)[number];
 
 export const remoteToolSchemas = {
+  /**
+   * Bootstrap: the two tools that let an agent set a project up from a repository it can read.
+   *
+   * The platform cannot see the developer's disk, so the agent reads the language files with its
+   * own tools and hands the content over. That is why these are Remote MCP tools rather than a
+   * server-side importer: the only party that can read the checkout is the agent.
+   */
+  create_project: z.object({
+    name: z.string().min(1).max(120),
+    source_locale: localeTagSchema,
+    locales: z.array(localeTagSchema).max(50).optional(),
+    platforms: z.array(platformSchema).max(5).optional(),
+    description: z.string().max(2000).optional(),
+    /** Where the repository keeps its language files; shapes the config this returns. */
+    locales_dir: z.string().max(200).optional(),
+  }),
+  import_translations: z.object({
+    project_id: z.string(),
+    files: z
+      .array(
+        z.object({
+          path: z.string().min(1),
+          locale: localeTagSchema,
+          platform: platformSchema.default('web'),
+          namespace: z.string().max(255).optional(),
+          entries: z.array(z.object({ key: z.string().min(1).max(512), value: z.string() })).min(1).max(20000),
+        }),
+      )
+      .min(1)
+      .max(500),
+    /** Apply the import. Without it the call only reports what would happen. */
+    confirm: z.boolean().default(false),
+  }),
   list_projects: z.object({}),
   get_project: z.object({ project_id: z.string() }),
   list_project_locales: z.object({ project_id: z.string() }),

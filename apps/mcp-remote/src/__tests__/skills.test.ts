@@ -5,6 +5,7 @@ import type { PrismaClient, TenantPrisma } from '@localehub/database';
 import {
   REMOTE_MCP_PROMPTS,
   REMOTE_MCP_RESOURCES,
+  REMOTE_MCP_TOOLS,
   Role,
   SKILLS_INDEX_URI,
   type SkillSourceRow,
@@ -164,11 +165,13 @@ describe('Remote MCP skill delivery', () => {
     }
   });
 
-  it('keeps all 15 tools and starts anyway when the skill query fails', async () => {
+  it('keeps every tool and starts anyway when the skill query fails', async () => {
     // A skills table that cannot be read must not take the tools down with it.
     const client = await connect(ROWS, { failQuery: true });
     try {
-      expect((await client.listTools()).tools).toHaveLength(15);
+      // Counted from the registry rather than hard-coded: the point of the test is that the tools
+      // survive a failed skill query, not that there are exactly fifteen of them.
+      expect((await client.listTools()).tools).toHaveLength(REMOTE_MCP_TOOLS.length);
 
       const uris = (await client.listResources()).resources.map((resource) => resource.uri);
       // The index is still advertised, and says so plainly rather than reading as "no skills exist".

@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { stringify as toYaml } from 'yaml';
 import { loadEnvFiles } from '@localehub/config';
 import { LocalSyncServices } from '@localehub/local-sync';
-import { loadLocalConfig } from '@localehub/workspace';
+import { loadLocalConfig, renderLocalConfig } from '@localehub/workspace';
 import { flagBool, parseArgs } from './args';
 
 /**
@@ -339,56 +338,22 @@ function init(workspace: string, flags: Record<string, string | boolean>): void 
   const locales = String(flags.locales ?? 'ja-JP')
     .split(',')
     .map((locale) => locale.trim())
-    .filter((locale) => locale && locale !== sourceLocale);
+    .filter(Boolean);
 
-  const config = {
-    version: 1,
-    project: { id: projectId, name: 'My Product', sourceLocale, platforms: ['web'] },
-    localehub: { apiUrl, tokenEnv: 'LOCALEHUB_TOKEN' },
-    workspace: {
-      root: '.',
-      allowRead: ['src/**', 'app/**'],
-      allowWrite: [`locales/**`],
-      denyRead: ['.env*', '**/secrets/**', 'node_modules/**'],
-      denyWrite: ['.env*', '**/secrets/**', '**/*.generated.*'],
-    },
-    sync: {
-      defaultDirection: 'bidirectional',
-      deletePolicy: 'archive',
-      applyPolicy: 'approved_only',
-      conflictPolicy: 'manual',
-      writeMode: 'dry_run_by_default',
-      preserveUnknownFields: true,
-      createBackup: true,
-      maxFilesPerBatch: 500,
-    },
-    files: [
-      {
-        id: 'web-source',
-        platform: 'web',
-        locale: sourceLocale,
-        format: 'json',
-        source: true,
-        paths: [`locales/${sourceLocale}/**/*.json`],
-        keyMode: 'nested',
-        namespaceFromPath: true,
-      },
-      ...locales.map((locale) => ({
-        id: `web-${locale.toLowerCase()}`,
-        platform: 'web',
-        locale,
-        format: 'json',
-        source: false,
-        paths: [`locales/${locale}/**/*.json`],
-        keyMode: 'nested',
-        namespaceFromPath: true,
-      })),
-    ],
-    ignore: { keys: ['debug.*'], paths: ['**/*.generated.*'] },
-  };
+  // The same template the Remote MCP's `create_project` returns, so a repository initialised here
+  // and one initialised by an agent produce the same file.
+  const { yaml } = renderLocalConfig({
+    projectId,
+    projectName: (flags.name as string | undefined) ?? 'My Product',
+    sourceLocale,
+    locales,
+    platforms: ['web'],
+    apiUrl,
+    ...(flags['locales-dir'] ? { localesDir: flags['locales-dir'] as string } : {}),
+  });
 
   mkdirSync(join(workspace, '.localehub'), { recursive: true });
-  writeFileSync(configPath, `# LocaleHub repository configuration — see docs/MCP.md\n${toYaml(config)}`, 'utf8');
+  writeFileSync(configPath, yaml, 'utf8');
   process.stdout.write(
     `wrote ${configPath}\n\nNext steps:\n  1. put your project id in project.id\n  2. export ${'LOCALEHUB_TOKEN'}=...\n  3. localehub info && localehub scan\n  4. localehub sync preview\n`,
   );

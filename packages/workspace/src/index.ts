@@ -289,3 +289,4 @@ export * from './config';
 export * from './writer';
 export * from './scanner';
 export * from './git';
+export * from './config-template';

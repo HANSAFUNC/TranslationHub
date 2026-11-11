@@ -530,6 +530,43 @@ docker compose build api worker mcp-remote web && docker compose up -d --force-r
 回收 21.77 GB 后自行恢复，无需重建数据。这一条与 §1.10 的「只在容器里出现的缺陷」同类：
 **症状指向数据库，原因在磁盘**。
 
+### 1.27 从仓库初始化项目（本轮新增）
+
+上一轮补了接入教程，但它默认「你已经有一个项目」。真实的第一天不是这样：仓库里已经有语言文件，
+平台上什么都没有。而且**远程 MCP 当时根本没有建项目的工具**——15 个工具全是读写既有项目，Agent
+无法把仓库接到平台上。
+
+新增两个工具：
+
+| 工具                  | 做什么                                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `create_project`      | 建项目（语言、平台、创建者成为该项目 PROJECT_MANAGER），**返回可直接写入 `.localehub/config.yaml` 的完整内容**与后续步骤 |
+| `import_translations` | 把一批语言文件内容写成 Key / 源文版本 / 译文；默认 dry-run，`confirm=true` 才落库                                        |
+
+三个刻意的决定：
+
+1. **是 Agent 读文件，不是平台。** 平台够不到开发者的磁盘，所以 Agent 用自己的文件工具读语言文件、
+   把内容交给 MCP。这不是绕过边界，而是边界本身决定的形状。
+2. **配置是「返回」而不是「写入」。** `create_project` 把配置文件的内容作为返回值交给 Agent，
+   由 Agent 写进仓库——初始化路径上同样不碰使用者的磁盘。
+3. **导入复用 CLI 的管道**（`recordScan` → `createPreview` → `push`），因此 Agent 导入与 CLI 推送
+   不可能在平台上留下不同的状态。
+
+**顺带消除了两份实现**：建项目原本只在 `ProjectsService.create` 里，MCP 要建项目就得抄一遍。现在抽到
+`packages/domain/src/projects.ts` 的 `createProject(tx, input)`，REST 与 MCP 共用；`slugify` 同理。
+`localehub init` 与 `create_project` 也共用 `packages/workspace/src/config-template.ts` 的模板，
+所以「命令行初始化」与「Agent 初始化」产出的配置文件逐字一致。
+
+**容器状态**：本轮的 `docker compose build` 因 Docker Hub 认证失败（`failed to fetch oauth token: … EOF`）
+没能装进镜像，因此容器栈仍是上一版——**但功能正常**，因为本轮没有数据库迁移，缺的只是两个新工具。
+本地进程验证全部通过；网络稳定后 `docker compose build api worker mcp-remote web && docker compose up -d
+--force-recreate` 即可。
+
+验证：6 个集成测试（真库 + 真 API + 真 MCP 进程 + 真 Streamable HTTP 客户端）。其中最关键的一条是
+**把 `create_project` 返回的配置文本喂给 `localConfigSchema` 校验**——一个「看起来对但 CLI 不接受」的
+模板会让使用者拿到一个坏仓库却看不出原因。其余覆盖：返回的后续步骤含项目 id 与 token 变量、
+DEVELOPER 建项目被拒、dry-run 不落库、确认后 Key 与译文确实写入、Token 未绑定的项目被拒。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -582,7 +619,7 @@ pnpm -r build                     # 全部 packages + apps 编译通过
 pnpm --filter @localehub/web exec next build   # 15 条路由构建成功
 pnpm -r typecheck                              # 16 个 workspace 项目全部通过
 pnpm test                                      # 181 unit tests passed（OpenAPI 一致性 7、CSV/XLSX 22、Webhook 14、发布包 9）
-pnpm test:integration                          # 98 integration tests passed（含 6 个 RLS 直连验证）
+pnpm test:integration                          # 104 integration tests passed（含 6 个 RLS 直连验证、6 个仓库初始化）
 node apps/e2e-demo/dist/run-demo.js            # ALL ACCEPTANCE CHECKS PASSED（A–E）
 docker compose config                          # valid
 docker compose -f compose.yaml -f compose.production.yaml config   # valid
