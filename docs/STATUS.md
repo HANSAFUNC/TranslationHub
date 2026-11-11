@@ -448,6 +448,52 @@ zip 是手写的（约 120 行）而不是引依赖：需要的形状很小，�
 路径与内容、manifest 内容与摘要、存储的读写与隔离）+ 6 个集成测试（真库 + 真 API：建发布、未打包时
 404、打包、下载得到真实 zip 且信封未污染、重新打包字节相同、跨项目 id 取不到）。
 
+### 1.24 `users` / `organizations` / `review_actions` 的 RLS（本轮新增）
+
+这三张表最初被排除在行级策略之外，因为它们都没有 `organization_id` 列：`users` 与
+`organizations` 天然是全局的，`review_actions` 通过 `review_tasks` 关联租户。
+
+**这个缺口的方向是危险的**：应用角色不是表 owner，没有策略时未限定租户的读取返回的是
+**全部行**，而不是零行。对 `users` 来说，这意味着任何忘记加过滤条件的代码路径都能读到所有用户的
+密码哈希。
+
+三张表各自的策略用各自能表达的写法：
+
+- 用户：属于当前组织时可见，经 `memberships` 子查询判断——而 `memberships` 本身受策略保护，
+  所以这条不能用来枚举别的租户的人；
+- 组织：只有当前会话所属的那一个可见；
+- 审核动作：其审核任务在范围内时可见。
+
+给 `users` 加策略**当场打断了登录**，而这正是这次改动有价值的部分：`auth.controller` 写
+`lastLoginAt` 用的是裸 `prisma.user.update`，新策略下匹配 0 行，报错是「record not found」——
+一个刚刚认证成功的账号却「不存在」。该调用改为走 `withoutTenantScope`（这个文件里其他用户读取
+本来就走这条特权路径），并做了一次全仓扫描确认三张表上不再有裸调用。
+
+这个例外是承重的、不是顺手加的，因此写在策略注释里：登录与 Token 认证在 `app.bypass_rls = on`
+下运行，因为它们在任何组织已知之前就要读 `users`。
+
+验证方式特意选了**直接用应用角色**（生产同款凭据）而不是经过 API：跨租户读为空、无上下文读为空、
+审核动作经任务正确隔离，以及登录路径依然可用。
+
+### 1.25 已知环境问题：运行中的 Docker 栈无法登录（本文档写作时）
+
+本轮最后一次成功的镜像构建是 **2026-11-10**。之后 Docker 守护进程内的网络持续失败
+（`registry.npmjs.org` 上的 `ECONNRESET`、`pnpm` 自举下载失败），因此 `docker compose build` 无法
+把本轮代码装进镜像。
+
+后果：`docker compose` 里那个 API 容器运行的是**没有** §1.24 那批改动的旧代码，而数据库已经应用了
+新的 RLS 迁移——旧代码里裸写的 `prisma.user.update`（登录时更新 `lastLoginAt`）在新策略下匹配 0 行，
+于是**容器栈登录返回 404**。
+
+这不是代码缺陷：同一份代码用本地进程连同一个数据库，登录、集成测试与演示全部通过。修复动作只有
+一个：
+
+```bash
+docker compose build api mcp-remote web && docker compose up -d
+```
+
+（网络恢复后执行。宿主侧 `pnpm` 与 `npm` 是可用的，失败的只有 Docker 内部。）
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -469,7 +515,7 @@ zip 是手写的（约 120 行）而不是引依赖：需要的形状很小，�
 | Docker 镜像与整套 compose 栈                        | **已完成** | `docker compose up -d --build` 起全套（postgres / redis / api / worker / mcp-remote / web）。无头 Chrome 实测 24/24：登录后首页、9 条路由与两张项目详情页都渲染出真实数据（不是只 HTTP 200），`/mcp`「客户端配置」三个片段可渲染可复制，桌面与 390px 均无横向溢出；Remote MCP 用 SDK 客户端握手 15 个工具，本地文件类工具未暴露。**过程中发现并修掉两个只在容器里出现的缺陷，见 §1.10** |
 | i18n Adapter：JSON 数组/ICU AST                     | 部分       | ICU 复数以字符串形式保存，非 AST 级编辑                                                                                                                                                                                                                                                                                                                                                 |
 | `file_hash` 级别的映射变更检测                      | **已完成** | 映射变化现在产生 `FILE_MAPPING_CHANGED` 冲突，见 §1.21                                                                                                                                                                                                                                                                                                                                  |
-| `organizations` / `users` / `review_actions` 的 RLS | **未覆盖** | 这三张表没有 `organization_id` 列（`review_actions` 通过 `review_tasks` 关联），未启用行级策略。应用角色可读取全部用户行（含密码哈希）——前提是先通过鉴权；认证路径本就走特权通道。补法见 §5 第 1 项                                                                                                                                                                                     |
+| `organizations` / `users` / `review_actions` 的 RLS | **已完成** | 三张表都已启用行级策略；无组织上下文时返回 0 行，跨租户不可见。见 §1.24                                                                                                                                                                                                                                                                                                                 |
 
 ## 3. 已知风险与设计取舍
 
@@ -500,7 +546,7 @@ pnpm -r build                     # 全部 packages + apps 编译通过
 pnpm --filter @localehub/web exec next build   # 15 条路由构建成功
 pnpm -r typecheck                              # 16 个 workspace 项目全部通过
 pnpm test                                      # 181 unit tests passed（OpenAPI 一致性 7、CSV/XLSX 22、Webhook 14、发布包 9）
-pnpm test:integration                          # 92 integration tests passed（14 验收 + 12 安全 + 11 Skill + 22 成员 + 15 账号审计 + 6 导入导出 + 6 Webhook + 6 发布包）
+pnpm test:integration                          # 98 integration tests passed（含 6 个 RLS 直连验证）
 node apps/e2e-demo/dist/run-demo.js            # ALL ACCEPTANCE CHECKS PASSED（A–E）
 docker compose config                          # valid
 docker compose -f compose.yaml -f compose.production.yaml config   # valid
