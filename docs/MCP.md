@@ -30,7 +30,47 @@ Content-Type: application/json
 
 无状态（每个请求自带凭据），因此不存在跨租户的会话泄漏面。
 
-### 2.1 客户端配置
+### 2.1 接入教程（四步）
+
+Web 端「MCP 管理 → 接入教程」是同一份流程，且会用**你自己的项目**生成示例。这里给读文档的人一份
+自足的版本。
+
+**第 1 步：签发 Token。** 「开发者 → API / MCP Token」→ 选 scopes → 签发。明文只显示一次。
+
+| 用途                  | scopes                                                        |
+| --------------------- | ------------------------------------------------------------- |
+| 只读查看              | `project.read`、`translation.read`、`glossary.read`           |
+| 让 Agent 写草稿       | 再加 `translation.write`                                      |
+| 提交审核              | 再加 `translation.review`（仍需人类 REVIEWER 批准）           |
+| 让 Agent 回报仓库写回 | 再加 `sync.push` / `translation.apply`（两者互相独立，见 §5） |
+
+```bash
+export LOCALEHUB_TOKEN="lh_mcp_…"   # 存进环境变量，不要提交到 Git
+```
+
+**第 2 步：拿到你的 `project_id`。** 15 个工具里有 14 个把它当第一个参数，而它是个 UUID——
+不能靠猜。
+
+两种拿法：
+
+- 打开项目的详情页，标题旁就是 `project_id`，点一下即复制（项目页地址的最后一段也是它）；
+- 或者直接问 Agent：`list_projects` **只返回这个 Token 能访问的项目**，所以它看到的是你的项目，
+  不是别人的。这也是「数据自动适配使用者」的实现方式——过滤依据是 Token 绑定的
+  `project_ids` 与用户自身的项目角色，不是你手动填的什么东西。
+
+**第 3 步：把配置放进客户端。** 与本仓库、本地配置无关，只需要 URL 加 Token，可以配在任何机器上。
+
+**第 4 步：验证。**
+
+> 列出 LocaleHub 上我能访问的项目，然后读取 <你的项目> 的语言列表。
+
+能看到自己的项目就说明通了。接着可以让它做事，例如：
+
+> 用 project_id=<你的 project_id> 搜索待审核的译文，逐条给出审核建议。
+
+> 用 project_id=<你的 project_id> 读取 QA 问题，给出修复后的译文并写入草稿。
+
+### 2.2 配置片段
 
 Remote MCP 与本仓库、本地配置**无关**：它只需要一个 URL 和一个 Token，因此可以配在任何地方
 （另一台机器、CI、纯平台侧 Agent）。
@@ -70,6 +110,8 @@ claude mcp add --transport http localehub-remote http://localhost:3003/mcp \
   --header "Authorization: Bearer $LOCALEHUB_TOKEN"
 ```
 
+### 2.2.1 要点与约束
+
 几个要点：
 
 - **Token 是必须的**，不带 Token 的请求返回 401。用平台「开发者 → Token」签发，scope 按用途选：
@@ -98,6 +140,20 @@ claude mcp add --transport http localehub-remote http://localhost:3003/mcp \
 
 Resources / Prompts 清单可通过 `GET /api/v1/mcp/tools` 获取（含 JSON Schema）。该响应还包含
 `skillDelivery`，即下发的 URI 模板与 prompt 前缀，供 Web UI 直接渲染。
+
+### 2.3 使用者之间如何隔离
+
+「别人用的数据要自动适配使用者的项目」这件事在平台上是这样落地的，每一层都不需要使用者手动配置：
+
+| 层         | 机制                                                                                             |
+| ---------- | ------------------------------------------------------------------------------------------------ |
+| Token      | 绑定签发时的用户、组织与 `project_ids`；`list_projects` 与其余工具都按它过滤                     |
+| 角色       | 同一个 Token 解析出的 actor 带用户的组织角色与项目角色，权限与浏览器登录完全一致                 |
+| 数据库     | 每张租户表都有行级策略，`app.current_org_id` 之外的行走 SQL 层就不可见（§1.24）                  |
+| 文档与示例 | Web 教程用**当前登录者自己的项目**生成 `project_id` 与示例提示词；文档里只有占位符，没有演示数据 |
+
+因此接入者看到的项目列表、示例里的 id、能读到的译文，都是他自己的。平台侧不存在需要他「改成自己的」
+配置项——URL 由部署方通过 `MCP_PUBLIC_URL` 决定，其余全部由 Token 推导。
 
 ## 3. 本地仓库操作：CLI（不是 MCP）
 

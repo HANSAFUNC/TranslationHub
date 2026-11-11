@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { GitBranch, Languages, MonitorSmartphone, Plug, Users } from 'lucide-react';
+import { Copy, GitBranch, Languages, MonitorSmartphone, Plug, Users } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,6 +16,7 @@ import { StatCard } from '@/components/stat-card';
 import { StatusBadge } from '@/components/status-badge';
 import { timeAgo, useAsync } from '@/components/use-async';
 import { get } from '@/lib/api';
+import { toast } from 'sonner';
 
 interface ProjectDetail {
   id: string;
@@ -69,8 +70,25 @@ export default function ProjectPage() {
       <PageHeader
         title={project?.name ?? '项目'}
         description={
-          <span className="font-mono text-xs">
-            {project?.sourceLocale} · revision {project?.revision ?? 0} · {project?.platforms.map((p) => p.platform).join(', ')}
+          // The project id is shown because it is what every MCP tool takes as its first argument.
+          // It used to be invisible: the only way to obtain it was `list_projects` over MCP or a
+          // look at the URL, which is a poor answer to "what do I put in project_id".
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-xs">
+              {project?.sourceLocale} · revision {project?.revision ?? 0} · {project?.platforms.map((p) => p.platform).join(', ')}
+            </span>
+            <button
+              type="button"
+              className="bg-muted/60 hover:bg-muted flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px]"
+              onClick={async () => {
+                await navigator.clipboard.writeText(projectId);
+                toast.success('已复制 project_id');
+              }}
+              aria-label="复制 project_id"
+            >
+              <Copy className="size-3" />
+              {projectId}
+            </button>
           </span>
         }
         actions={
