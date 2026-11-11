@@ -475,24 +475,29 @@ zip 是手写的（约 120 行）而不是引依赖：需要的形状很小，�
 验证方式特意选了**直接用应用角色**（生产同款凭据）而不是经过 API：跨租户读为空、无上下文读为空、
 审核动作经任务正确隔离，以及登录路径依然可用。
 
-### 1.25 已知环境问题：运行中的 Docker 栈无法登录（本文档写作时）
+### 1.25 Docker 栈已重建并验证（本轮）
 
-本轮最后一次成功的镜像构建是 **2026-11-10**。之后 Docker 守护进程内的网络持续失败
-（`registry.npmjs.org` 上的 `ECONNRESET`、`pnpm` 自举下载失败），因此 `docker compose build` 无法
-把本轮代码装进镜像。
+本轮最后一次改动后，Docker 守护进程内的网络一度持续失败（`registry.npmjs.org` 上的 `ECONNRESET`），
+`docker compose build` 装不进新代码，而数据库已应用新的 RLS 迁移——旧镜像里裸写的
+`prisma.user.update`（登录更新 `lastLoginAt`）在新策略下匹配 0 行，于是容器栈登录返回 404。
 
-后果：`docker compose` 里那个 API 容器运行的是**没有** §1.24 那批改动的旧代码，而数据库已经应用了
-新的 RLS 迁移——旧代码里裸写的 `prisma.user.update`（登录时更新 `lastLoginAt`）在新策略下匹配 0 行，
-于是**容器栈登录返回 404**。
-
-这不是代码缺陷：同一份代码用本地进程连同一个数据库，登录、集成测试与演示全部通过。修复动作只有
-一个：
+网络恢复后已重建并验证。**其中一处值得记下**：`worker` 用的是独立镜像 `localehub-worker`，不是
+`localehub-api`；只重建后者时 worker 仍跑旧代码，日志里少一个队列（4 个而不是 5 个），很容易被当成
+「新功能没生效」。完整重建命令是：
 
 ```bash
-docker compose build api mcp-remote web && docker compose up -d
+docker compose build api worker mcp-remote web && docker compose up -d --force-recreate
 ```
 
-（网络恢复后执行。宿主侧 `pnpm` 与 `npm` 是可用的，失败的只有 Docker 内部。）
+重建后的容器栈验证：
+
+- 登录恢复（此前 404 的那条）；
+- 98 个集成测试对着**容器栈**全过（不是本地进程）；
+- `scripts/check-webhook-worker.mjs` 经容器内 worker 真实投递并验签通过——注意脚本的接收端要
+  监听 `0.0.0.0` 并把 `host.docker.internal` 写进 URL，否则容器内的 worker 连不上宿主上的接收端，
+  表现为 `fetch failed`（重试机制会正确地把它标成 PENDING/重试中）；
+- demo A–E 通过；
+- 无头 Chrome 实测 **15/15** 页面渲染真实数据、无错误提示、无横向溢出；390px 下五个设置页同样无溢出。
 
 ## 2. 未实现 / 部分实现
 

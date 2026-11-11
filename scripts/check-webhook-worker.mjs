@@ -27,8 +27,12 @@ const server = createServer((request, response) => {
     response.writeHead(200).end('ok');
   });
 });
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-const url = `http://127.0.0.1:${server.address().port}/hook`;
+// Bind on all interfaces and advertise a host the worker can reach. The worker may be a local
+// process (then 127.0.0.1 works) or a container (then it needs host.docker.internal), and the
+// difference is invisible from here — WEBHOOK_CHECK_HOST picks which to put in the URL.
+await new Promise((resolve) => server.listen(0, '0.0.0.0', resolve));
+const advertisedHost = process.env.WEBHOOK_CHECK_HOST ?? '127.0.0.1';
+const url = `http://${advertisedHost}:${server.address().port}/hook`;
 
 async function call(path, options = {}) {
   const response = await fetch(`${BASE}${path}`, {
