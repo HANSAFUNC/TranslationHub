@@ -1,0 +1,6289 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LocaleHub API",
+    "version": "0.1.0",
+    "description": "REST API for LocaleHub. Generated from the route decorators, the guard metadata and the\nzod validation pipes themselves — see `apps/api/src/openapi/document.ts`.\n\nAuthentication is either a bearer token (`lh_mcp_…` / `lh_api_…` / session JWT) or the\nbrowser session cookie plus the `X-CSRF-Token` double-submit header. `x-localehub-auth` on\neach operation records the role and scopes the guard enforces."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "tags": [
+    {
+      "name": "健康与系统",
+      "description": "健康与系统"
+    },
+    {
+      "name": "认证",
+      "description": "认证"
+    },
+    {
+      "name": "组织成员",
+      "description": "组织成员"
+    },
+    {
+      "name": "组织设置",
+      "description": "组织设置"
+    },
+    {
+      "name": "项目",
+      "description": "项目"
+    },
+    {
+      "name": "翻译与审核",
+      "description": "翻译与审核"
+    },
+    {
+      "name": "同步",
+      "description": "同步"
+    },
+    {
+      "name": "质量",
+      "description": "质量"
+    },
+    {
+      "name": "术语、记忆、AI、审计",
+      "description": "术语、记忆、AI、审计"
+    },
+    {
+      "name": "Skill、发布、导入导出",
+      "description": "Skill、发布、导入导出"
+    },
+    {
+      "name": "MCP Token",
+      "description": "MCP Token"
+    },
+    {
+      "name": "MCP 发现",
+      "description": "MCP 发现"
+    }
+  ],
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "operationId": "Auth_login",
+        "tags": [
+          "认证"
+        ],
+        "summary": "POST /auth/login",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": true,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "Auth_logout",
+        "tags": [
+          "认证"
+        ],
+        "summary": "POST /auth/logout",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "Auth_me",
+        "tags": [
+          "认证"
+        ],
+        "summary": "GET /auth/me",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "operationId": "Auth_register",
+        "tags": [
+          "认证"
+        ],
+        "summary": "POST /auth/register",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": true,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 200
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "organizationName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  }
+                },
+                "required": [
+                  "email",
+                  "password",
+                  "name",
+                  "organizationName"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/switch-organization": {
+      "post": {
+        "operationId": "Auth_switchOrganization",
+        "tags": [
+          "认证"
+        ],
+        "summary": "POST /auth/switch-organization",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "organizationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "organizationId"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "Health_health",
+        "tags": [
+          "健康与系统"
+        ],
+        "summary": "GET /health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": true,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "Health_ready",
+        "tags": [
+          "健康与系统"
+        ],
+        "summary": "GET /health/ready",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": true,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      }
+    },
+    "/mcp-tokens": {
+      "get": {
+        "operationId": "Tokens_list",
+        "tags": [
+          "MCP Token"
+        ],
+        "summary": "GET /mcp-tokens",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      },
+      "post": {
+        "operationId": "Tokens_create",
+        "tags": [
+          "MCP Token"
+        ],
+        "summary": "POST /mcp-tokens",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "project.read",
+                        "repository.scan",
+                        "sync.preview",
+                        "sync.push",
+                        "translation.read",
+                        "translation.write",
+                        "translation.pull",
+                        "translation.apply",
+                        "translation.review",
+                        "qa.execute",
+                        "glossary.read",
+                        "release.publish",
+                        "admin"
+                      ]
+                    },
+                    "minItems": 1
+                  },
+                  "projectIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": []
+                  },
+                  "expiresInDays": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 365,
+                    "default": 30
+                  },
+                  "repositoryConnectionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "scopes"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp-tokens/{id}": {
+      "delete": {
+        "operationId": "Tokens_revoke",
+        "tags": [
+          "MCP Token"
+        ],
+        "summary": "DELETE /mcp-tokens/{id}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/mcp/scopes": {
+      "get": {
+        "operationId": "Tokens_scopes",
+        "tags": [
+          "MCP Token"
+        ],
+        "summary": "GET /mcp/scopes",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      }
+    },
+    "/mcp/token-info": {
+      "get": {
+        "operationId": "Tokens_tokenInfo",
+        "tags": [
+          "MCP Token"
+        ],
+        "summary": "GET /mcp/token-info",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      }
+    },
+    "/mcp/tools": {
+      "get": {
+        "operationId": "Mcp_tools",
+        "tags": [
+          "MCP 发现"
+        ],
+        "summary": "GET /mcp/tools",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": true,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      }
+    },
+    "/organization": {
+      "get": {
+        "operationId": "Organizations_current",
+        "tags": [
+          "组织设置"
+        ],
+        "summary": "GET /organization",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      }
+    },
+    "/organization/members": {
+      "get": {
+        "operationId": "Users_list",
+        "tags": [
+          "组织成员"
+        ],
+        "summary": "GET /organization/members",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "ORG_ADMIN",
+          "scopes": [],
+          "enforcedBy": "service",
+          "note": "组织管理员，或在任一项目上具备 PROJECT_MANAGER"
+        }
+      },
+      "post": {
+        "operationId": "Users_add",
+        "tags": [
+          "组织成员"
+        ],
+        "summary": "POST /organization/members",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "ORG_ADMIN",
+          "scopes": [],
+          "enforcedBy": "service",
+          "note": "且不得授予高于自己的组织角色；不会修改已有账号的密码"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 200
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "ORG_OWNER",
+                      "ORG_ADMIN",
+                      "PROJECT_MANAGER",
+                      "DEVELOPER",
+                      "PRODUCT_MANAGER",
+                      "TRANSLATOR",
+                      "REVIEWER",
+                      "READONLY"
+                    ]
+                  }
+                },
+                "required": [
+                  "email",
+                  "role"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organization/members/{userId}": {
+      "delete": {
+        "operationId": "Users_remove",
+        "tags": [
+          "组织成员"
+        ],
+        "summary": "DELETE /organization/members/{userId}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "ORG_ADMIN",
+          "scopes": [],
+          "enforcedBy": "service",
+          "note": "不得移除自己或高于自己的成员，必须留下至少一个所有者"
+        },
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "Users_updateRole",
+        "tags": [
+          "组织成员"
+        ],
+        "summary": "PATCH /organization/members/{userId}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "ORG_ADMIN",
+          "scopes": [],
+          "enforcedBy": "service",
+          "note": "不得修改高于自己的成员，不得改动自己，必须留下至少一个所有者"
+        },
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "ORG_OWNER",
+                      "ORG_ADMIN",
+                      "PROJECT_MANAGER",
+                      "DEVELOPER",
+                      "PRODUCT_MANAGER",
+                      "TRANSLATOR",
+                      "REVIEWER",
+                      "READONLY"
+                    ]
+                  }
+                },
+                "required": [
+                  "role"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organization/members/{userId}/password": {
+      "post": {
+        "operationId": "Users_resetPassword",
+        "tags": [
+          "组织成员"
+        ],
+        "summary": "POST /organization/members/{userId}/password",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "ORG_ADMIN",
+          "scopes": [],
+          "enforcedBy": "service",
+          "note": "不能重置自己的密码（用 /auth/password）"
+        },
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "password"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organization/members/{userId}/projects/{projectId}": {
+      "delete": {
+        "operationId": "Users_removeProjectRole",
+        "tags": [
+          "组织成员"
+        ],
+        "summary": "DELETE /organization/members/{userId}/projects/{projectId}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "service",
+          "note": "该项目上的 PROJECT_MANAGER 或组织管理员"
+        },
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "Users_setProjectRole",
+        "tags": [
+          "组织成员"
+        ],
+        "summary": "PUT /organization/members/{userId}/projects/{projectId}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "service",
+          "note": "该项目上的 PROJECT_MANAGER 或组织管理员"
+        },
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "PROJECT_MANAGER",
+                      "DEVELOPER",
+                      "PRODUCT_MANAGER",
+                      "TRANSLATOR",
+                      "REVIEWER",
+                      "READONLY"
+                    ]
+                  },
+                  "localeScope": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "maxItems": 50
+                  }
+                },
+                "required": [
+                  "role"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organization/overview": {
+      "get": {
+        "operationId": "Content_overview",
+        "tags": [
+          "术语、记忆、AI、审计"
+        ],
+        "summary": "GET /organization/overview",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      }
+    },
+    "/organization/settings": {
+      "patch": {
+        "operationId": "Organizations_updateSettings",
+        "tags": [
+          "组织设置"
+        ],
+        "summary": "PATCH /organization/settings",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "ORG_ADMIN",
+          "scopes": [],
+          "enforcedBy": "service",
+          "note": "service 内校验：仅组织所有者 / 管理员"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "allowDraftApply": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects": {
+      "get": {
+        "operationId": "Projects_list",
+        "tags": [
+          "项目"
+        ],
+        "summary": "GET /projects",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      },
+      "post": {
+        "operationId": "Projects_create",
+        "tags": [
+          "项目"
+        ],
+        "summary": "POST /projects",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "service",
+          "note": "service 内 assertRole：本路由不带 projectId，guard 的 @RequireRole 不生效"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "sourceLocale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "defaultPlatform": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "ios",
+                      "android",
+                      "universal"
+                    ]
+                  },
+                  "locales": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "maxItems": 80
+                  },
+                  "platforms": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "web",
+                        "ios",
+                        "android",
+                        "universal"
+                      ]
+                    },
+                    "maxItems": 4
+                  }
+                },
+                "required": [
+                  "name",
+                  "sourceLocale"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}": {
+      "delete": {
+        "operationId": "Projects_remove",
+        "tags": [
+          "项目"
+        ],
+        "summary": "DELETE /projects/{projectId}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "confirmName",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "get": {
+        "operationId": "Projects_get",
+        "tags": [
+          "项目"
+        ],
+        "summary": "GET /projects/{projectId}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "Projects_update",
+        "tags": [
+          "项目"
+        ],
+        "summary": "PATCH /projects/{projectId}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "defaultPlatform": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "ios",
+                      "android",
+                      "universal"
+                    ]
+                  },
+                  "aiPolicy": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/ai/providers": {
+      "get": {
+        "operationId": "Content_aiProviders",
+        "tags": [
+          "术语、记忆、AI、审计"
+        ],
+        "summary": "GET /projects/{projectId}/ai/providers",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/ai/review": {
+      "post": {
+        "operationId": "Content_aiReview",
+        "tags": [
+          "术语、记忆、AI、审计"
+        ],
+        "summary": "POST /projects/{projectId}/ai/review",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "REVIEWER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "entryIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  }
+                },
+                "required": [
+                  "entryIds"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/ai/translate": {
+      "post": {
+        "operationId": "Content_aiTranslate",
+        "tags": [
+          "术语、记忆、AI、审计"
+        ],
+        "summary": "POST /projects/{projectId}/ai/translate",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PRODUCT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "entryIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  },
+                  "targetLocales": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "writeDrafts": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                },
+                "required": [
+                  "entryIds",
+                  "targetLocales"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/audit": {
+      "get": {
+        "operationId": "Content_audit",
+        "tags": [
+          "术语、记忆、AI、审计"
+        ],
+        "summary": "GET /projects/{projectId}/audit",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/dashboard": {
+      "get": {
+        "operationId": "Projects_dashboard",
+        "tags": [
+          "项目"
+        ],
+        "summary": "GET /projects/{projectId}/dashboard",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/entry-by-key": {
+      "get": {
+        "operationId": "Content_entryByKey",
+        "tags": [
+          "术语、记忆、AI、审计"
+        ],
+        "summary": "GET /projects/{projectId}/entry-by-key",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/events": {
+      "get": {
+        "operationId": "Sync_events",
+        "tags": [
+          "同步"
+        ],
+        "summary": "GET /projects/{projectId}/events",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since_revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 500
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/export": {
+      "get": {
+        "operationId": "Platform_export",
+        "tags": [
+          "Skill、发布、导入导出"
+        ],
+        "summary": "GET /projects/{projectId}/export",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "yaml",
+                "po",
+                "xliff",
+                "ios-strings",
+                "ios-stringsdict",
+                "xcstrings",
+                "android-xml"
+              ],
+              "default": "json"
+            }
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "web",
+                "ios",
+                "android",
+                "universal"
+              ],
+              "default": "web"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/glossary": {
+      "get": {
+        "operationId": "Content_glossary",
+        "tags": [
+          "术语、记忆、AI、审计"
+        ],
+        "summary": "GET /projects/{projectId}/glossary",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "Content_addTerm",
+        "tags": [
+          "术语、记忆、AI、审计"
+        ],
+        "summary": "POST /projects/{projectId}/glossary",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "term": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "translations": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "caseSensitive": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "term",
+                  "translations"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/keys": {
+      "get": {
+        "operationId": "Content_keys",
+        "tags": [
+          "术语、记忆、AI、审计"
+        ],
+        "summary": "GET /projects/{projectId}/keys",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "web",
+                "ios",
+                "android",
+                "universal"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 200
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/locales": {
+      "get": {
+        "operationId": "Projects_locales",
+        "tags": [
+          "项目"
+        ],
+        "summary": "GET /projects/{projectId}/locales",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "Projects_addLocale",
+        "tags": [
+          "项目"
+        ],
+        "summary": "POST /projects/{projectId}/locales",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 80
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/members": {
+      "get": {
+        "operationId": "Projects_members",
+        "tags": [
+          "项目"
+        ],
+        "summary": "GET /projects/{projectId}/members",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/platforms": {
+      "get": {
+        "operationId": "Projects_platforms",
+        "tags": [
+          "项目"
+        ],
+        "summary": "GET /projects/{projectId}/platforms",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "Projects_addPlatform",
+        "tags": [
+          "项目"
+        ],
+        "summary": "POST /projects/{projectId}/platforms",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "ios",
+                      "android",
+                      "universal"
+                    ]
+                  }
+                },
+                "required": [
+                  "platform"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/qa/issues": {
+      "get": {
+        "operationId": "Qa_issues",
+        "tags": [
+          "质量"
+        ],
+        "summary": "GET /projects/{projectId}/qa/issues",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ERROR",
+                "WARNING",
+                "INFO"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "OPEN",
+                "RESOLVED",
+                "IGNORED"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 500
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/qa/report": {
+      "get": {
+        "operationId": "Qa_report",
+        "tags": [
+          "质量"
+        ],
+        "summary": "GET /projects/{projectId}/qa/report",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/qa/rules": {
+      "get": {
+        "operationId": "Qa_rules",
+        "tags": [
+          "质量"
+        ],
+        "summary": "GET /projects/{projectId}/qa/rules",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/qa/run": {
+      "post": {
+        "operationId": "Qa_run",
+        "tags": [
+          "质量"
+        ],
+        "summary": "POST /projects/{projectId}/qa/run",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "TRANSLATOR",
+          "scopes": [
+            "qa.execute"
+          ],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "locale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "entryIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 2000
+                  },
+                  "enabledRules": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "disabledRules": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/qa/run-async": {
+      "post": {
+        "operationId": "Platform_runQaAsync",
+        "tags": [
+          "Skill、发布、导入导出"
+        ],
+        "summary": "POST /projects/{projectId}/qa/run-async",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "TRANSLATOR",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "locale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/releases": {
+      "get": {
+        "operationId": "Platform_listReleases",
+        "tags": [
+          "Skill、发布、导入导出"
+        ],
+        "summary": "GET /projects/{projectId}/releases",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "Platform_createRelease",
+        "tags": [
+          "Skill、发布、导入导出"
+        ],
+        "summary": "POST /projects/{projectId}/releases",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "locales": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "name",
+                  "locales"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/repository-connections": {
+      "get": {
+        "operationId": "Sync_listConnections",
+        "tags": [
+          "同步"
+        ],
+        "summary": "GET /projects/{projectId}/repository-connections",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "Sync_createConnection",
+        "tags": [
+          "同步"
+        ],
+        "summary": "POST /projects/{projectId}/repository-connections",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "github",
+                      "gitlab",
+                      "bitbucket",
+                      "azure_devops",
+                      "local"
+                    ],
+                    "default": "local"
+                  },
+                  "repoUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "defaultBranch": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "default": "main"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/reviews/queue": {
+      "get": {
+        "operationId": "Translations_reviewQueue",
+        "tags": [
+          "翻译与审核"
+        ],
+        "summary": "GET /projects/{projectId}/reviews/queue",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/sync/baseline": {
+      "get": {
+        "operationId": "Sync_baseline",
+        "tags": [
+          "同步"
+        ],
+        "summary": "GET /projects/{projectId}/sync/baseline",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since_revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "locales",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/sync/changes": {
+      "get": {
+        "operationId": "Sync_changes",
+        "tags": [
+          "同步"
+        ],
+        "summary": "GET /projects/{projectId}/sync/changes",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "DRAFT",
+                    "PENDING_REVIEW",
+                    "APPROVED",
+                    "REJECTED",
+                    "STALE"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "DRAFT",
+                      "PENDING_REVIEW",
+                      "APPROVED",
+                      "REJECTED",
+                      "STALE"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "since_revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 2000
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/sync/sessions": {
+      "get": {
+        "operationId": "Sync_sessions",
+        "tags": [
+          "同步"
+        ],
+        "summary": "GET /projects/{projectId}/sync/sessions",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/sync/status": {
+      "get": {
+        "operationId": "Sync_status",
+        "tags": [
+          "同步"
+        ],
+        "summary": "GET /projects/{projectId}/sync/status",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/sync/validate": {
+      "post": {
+        "operationId": "Sync_validate",
+        "tags": [
+          "同步"
+        ],
+        "summary": "POST /projects/{projectId}/sync/validate",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "DEVELOPER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/translation-memory": {
+      "get": {
+        "operationId": "Content_searchTm",
+        "tags": [
+          "术语、记忆、AI、审计"
+        ],
+        "summary": "GET /projects/{projectId}/translation-memory",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 50
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/translations": {
+      "get": {
+        "operationId": "Translations_list",
+        "tags": [
+          "翻译与审核"
+        ],
+        "summary": "GET /projects/{projectId}/translations",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "web",
+                "ios",
+                "android",
+                "universal"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "DRAFT",
+                    "PENDING_REVIEW",
+                    "APPROVED",
+                    "REJECTED",
+                    "STALE"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "const": "UNTRANSLATED"
+                },
+                {
+                  "type": "string",
+                  "const": "ALL"
+                }
+              ]
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "keyPrefix",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 300
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 200
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/translations/{entryId}": {
+      "get": {
+        "operationId": "Translations_detail",
+        "tags": [
+          "翻译与审核"
+        ],
+        "summary": "GET /projects/{projectId}/translations/{entryId}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/translations/{entryId}/draft": {
+      "post": {
+        "operationId": "Translations_saveDraft",
+        "tags": [
+          "翻译与审核"
+        ],
+        "summary": "POST /projects/{projectId}/translations/{entryId}/draft",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "TRANSLATOR",
+          "scopes": [
+            "translation.write"
+          ],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  },
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "expectedContentHash": {
+                    "type": "string"
+                  },
+                  "comment": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/translations/{entryId}/versions": {
+      "get": {
+        "operationId": "Translations_versions",
+        "tags": [
+          "翻译与审核"
+        ],
+        "summary": "GET /projects/{projectId}/translations/{entryId}/versions",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/translations/by-key": {
+      "get": {
+        "operationId": "Translations_byKey",
+        "tags": [
+          "翻译与审核"
+        ],
+        "summary": "GET /projects/{projectId}/translations/by-key",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/translations/review": {
+      "post": {
+        "operationId": "Translations_review",
+        "tags": [
+          "翻译与审核"
+        ],
+        "summary": "POST /projects/{projectId}/translations/review",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "REVIEWER",
+          "scopes": [
+            "translation.review"
+          ],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "entryIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1,
+                    "maxItems": 500
+                  },
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "APPROVE",
+                      "REJECT",
+                      "REQUEST_CHANGES"
+                    ]
+                  },
+                  "comment": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "entryIds",
+                  "decision"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/translations/stale": {
+      "get": {
+        "operationId": "Translations_stale",
+        "tags": [
+          "翻译与审核"
+        ],
+        "summary": "GET /projects/{projectId}/translations/stale",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/projects/{projectId}/translations/submit": {
+      "post": {
+        "operationId": "Translations_submit",
+        "tags": [
+          "翻译与审核"
+        ],
+        "summary": "POST /projects/{projectId}/translations/submit",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "TRANSLATOR",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "entryIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1,
+                    "maxItems": 500
+                  },
+                  "comment": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "entryIds"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/skills": {
+      "get": {
+        "operationId": "Platform_listSkills",
+        "tags": [
+          "Skill、发布、导入导出"
+        ],
+        "summary": "GET /skills",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      },
+      "post": {
+        "operationId": "Platform_createSkill",
+        "tags": [
+          "Skill、发布、导入导出"
+        ],
+        "summary": "POST /skills",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "PROMPT",
+                      "SCRIPT"
+                    ],
+                    "default": "PROMPT"
+                  },
+                  "version": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "default": "1.0.0"
+                  },
+                  "content": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "manifest": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "default": {}
+                  }
+                },
+                "required": [
+                  "slug",
+                  "name",
+                  "content"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sync/apply-reports": {
+      "post": {
+        "operationId": "Sync_applyReport",
+        "tags": [
+          "同步"
+        ],
+        "summary": "POST /sync/apply-reports",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "DEVELOPER",
+          "scopes": [
+            "translation.apply"
+          ],
+          "enforcedBy": "guard"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "syncSessionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "applyPlanId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "client": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      },
+                      "gitBranch": {
+                        "type": "string"
+                      },
+                      "gitCommit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "version"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "SUCCEEDED",
+                      "PARTIAL",
+                      "FAILED"
+                    ]
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "filePath": {
+                          "type": "string"
+                        },
+                        "backupPath": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "contentHash": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "filePath",
+                        "contentHash"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "locale": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "namespace": {
+                          "type": "string",
+                          "default": ""
+                        },
+                        "platform": {
+                          "type": "string",
+                          "enum": [
+                            "web",
+                            "ios",
+                            "android",
+                            "universal"
+                          ]
+                        },
+                        "filePath": {
+                          "type": "string"
+                        },
+                        "applied": {
+                          "type": "boolean"
+                        },
+                        "previousValue": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "newValue": {
+                          "type": "string"
+                        },
+                        "translationVersionId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "errorCode": {
+                          "type": "string"
+                        },
+                        "errorMessage": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "locale",
+                        "platform",
+                        "filePath",
+                        "applied",
+                        "previousValue",
+                        "newValue",
+                        "translationVersionId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "gitCommit": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "gitDiffStat": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "syncSessionId",
+                  "applyPlanId",
+                  "client",
+                  "status",
+                  "files",
+                  "items"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sync/conflicts": {
+      "get": {
+        "operationId": "Sync_conflicts",
+        "tags": [
+          "同步"
+        ],
+        "summary": "GET /sync/conflicts",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "OPEN",
+                "RESOLVED",
+                "DEFERRED"
+              ]
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/sync/conflicts/{id}": {
+      "get": {
+        "operationId": "Sync_conflict",
+        "tags": [
+          "同步"
+        ],
+        "summary": "GET /sync/conflicts/{id}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/sync/conflicts/{id}/resolve": {
+      "post": {
+        "operationId": "Sync_resolve",
+        "tags": [
+          "同步"
+        ],
+        "summary": "POST /sync/conflicts/{id}/resolve",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "DEVELOPER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "resolution": {
+                    "type": "string",
+                    "enum": [
+                      "KEEP_LOCAL",
+                      "KEEP_REMOTE",
+                      "MANUAL_MERGE",
+                      "DEFER"
+                    ]
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "resolution"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sync/preview": {
+      "post": {
+        "operationId": "Sync_preview",
+        "tags": [
+          "同步"
+        ],
+        "summary": "POST /sync/preview",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "DEVELOPER",
+          "scopes": [
+            "sync.preview"
+          ],
+          "enforcedBy": "guard"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "repositoryConnectionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scanId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "direction": {
+                    "type": "string",
+                    "enum": [
+                      "bidirectional",
+                      "push",
+                      "pull"
+                    ],
+                    "default": "bidirectional"
+                  },
+                  "baseRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "includeDeletes": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "includeDrafts": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "locales": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    }
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "repositoryConnectionId",
+                  "scanId"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sync/push": {
+      "post": {
+        "operationId": "Sync_push",
+        "tags": [
+          "同步"
+        ],
+        "summary": "POST /sync/push",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "DEVELOPER",
+          "scopes": [
+            "sync.push"
+          ],
+          "enforcedBy": "guard"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "syncPlanId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "planHash": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "confirmed": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "client": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      },
+                      "gitBranch": {
+                        "type": "string"
+                      },
+                      "gitCommit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "version"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "syncPlanId",
+                  "planHash",
+                  "confirmed"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sync/recent-sessions": {
+      "get": {
+        "operationId": "Sync_recentSessions",
+        "tags": [
+          "同步"
+        ],
+        "summary": "GET /sync/recent-sessions",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 100
+            }
+          }
+        ]
+      }
+    },
+    "/sync/scans": {
+      "post": {
+        "operationId": "Sync_uploadScan",
+        "tags": [
+          "同步"
+        ],
+        "summary": "POST /sync/scans",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "DEVELOPER",
+          "scopes": [
+            "repository.scan"
+          ],
+          "enforcedBy": "guard"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "repositoryConnectionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scanId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "client": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      },
+                      "gitBranch": {
+                        "type": "string"
+                      },
+                      "gitCommit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "version"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "fileId": {
+                          "type": "string"
+                        },
+                        "filePath": {
+                          "type": "string"
+                        },
+                        "locale": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "platform": {
+                          "type": "string",
+                          "enum": [
+                            "web",
+                            "ios",
+                            "android",
+                            "universal"
+                          ]
+                        },
+                        "format": {
+                          "type": "string",
+                          "enum": [
+                            "json",
+                            "yaml",
+                            "po",
+                            "xliff",
+                            "ios-strings",
+                            "ios-stringsdict",
+                            "xcstrings",
+                            "android-xml"
+                          ]
+                        },
+                        "fileHash": {
+                          "type": "string"
+                        },
+                        "entryCount": {
+                          "type": "integer"
+                        },
+                        "parseError": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fileId",
+                        "filePath",
+                        "locale",
+                        "platform",
+                        "format",
+                        "fileHash",
+                        "entryCount"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "default": []
+                  },
+                  "entries": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        },
+                        "namespace": {
+                          "type": "string",
+                          "maxLength": 255,
+                          "default": ""
+                        },
+                        "locale": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "isSource": {
+                          "type": "boolean"
+                        },
+                        "contentHash": {
+                          "type": "string",
+                          "minLength": 64,
+                          "maxLength": 64
+                        },
+                        "fileId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "filePath": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "context": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "placeholders": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "format": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "platformMetadata": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "locale",
+                        "value",
+                        "isSource",
+                        "contentHash",
+                        "fileId",
+                        "filePath"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 20000
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "scanId",
+                  "entries"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sync/sessions/{id}": {
+      "get": {
+        "operationId": "Sync_session",
+        "tags": [
+          "同步"
+        ],
+        "summary": "GET /sync/sessions/{id}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/sync/sessions/{id}/items": {
+      "get": {
+        "operationId": "Sync_sessionItems",
+        "tags": [
+          "同步"
+        ],
+        "summary": "GET /sync/sessions/{id}/items",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/system/queues": {
+      "get": {
+        "operationId": "Platform_queues",
+        "tags": [
+          "Skill、发布、导入导出"
+        ],
+        "summary": "GET /system/queues",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": true,
+          "role": null,
+          "scopes": [],
+          "enforcedBy": "authentication"
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "localehub_session"
+      }
+    },
+    "schemas": {
+      "ApiEnvelope": {
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "description": "Response payload. Shape varies per endpoint and is not schema-checked."
+          },
+          "error": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Stable error code, e.g. SYNC_PLAN_EXPIRED"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "nullable": true
+              },
+              "requestId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

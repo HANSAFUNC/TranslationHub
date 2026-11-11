@@ -26,6 +26,7 @@ import { McpController } from './modules/mcp/mcp.controller';
 import { OrganizationsController } from './modules/organizations/organizations.controller';
 import { OrganizationsService } from './modules/organizations/organizations.service';
 import { UsersController } from './modules/users/users.controller';
+import { OpenApiController } from './openapi/openapi.controller';
 import { UsersService } from './modules/users/users.service';
 
 @Module({
@@ -42,6 +43,7 @@ import { UsersService } from './modules/users/users.service';
     McpController,
     OrganizationsController,
     UsersController,
+    OpenApiController,
   ],
   providers: [
     PrismaService,

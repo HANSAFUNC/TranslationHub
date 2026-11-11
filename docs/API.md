@@ -222,8 +222,42 @@ Idempotency-Key: repo-commit-a1b2-plan-xyz
 - 大文件使用预签名 URL（当前版本的导入导出走 JSON 响应，尚未接入对象存储）。
 - OpenAPI：见 §10。
 
-## 10. OpenAPI
+## 10. OpenAPI 3.1
 
-`GET /api/v1/mcp/tools` 提供 MCP 工具 JSON Schema。REST 的 OpenAPI 3.1 文档**尚未生成**
-（未实现项，见 docs/STATUS.md）；当前以本文档 + `apps/api/src/modules/**/*.controller.ts`
-的 zod schema 为准。
+**文档是生成的，不是手写的。**
+
+| 获取方式     | 地址                                                                                      |
+| ------------ | ----------------------------------------------------------------------------------------- |
+| 运行中的实例 | `GET /api/v1/openapi.json`（public，无需凭据——客户端在读它之前还没有凭据）                |
+| 仓库内       | [`docs/openapi.json`](./openapi.json)，由 `pnpm --filter @localehub/api openapi` 重新生成 |
+
+它由 `apps/api/src/openapi/document.ts` 从**代码本身**装配，不重复声明任何东西：
+
+- 路径与方法取自 `PATH_METADATA` / `METHOD_METADATA`；
+- `@Public()` / `@RequireRole` / `@RequireScopes` 取自它们的 `SetMetadata` 键——**和 `AuthGuard`
+  在请求时读的是同一份值**，所以文档写的权限不可能与真正生效的不同；
+- 请求体与查询 schema 取自路由参数上的 pipe 实例，也就是**真正做校验的那个** `ZodValidationPipe`。
+
+每个操作带 `x-localehub-auth`：
+
+```json
+{ "public": false, "role": "PROJECT_MANAGER", "scopes": [], "enforcedBy": "guard" }
+```
+
+`enforcedBy` 有三种取值，因为鉴权不一定在 guard 里：
+
+- `guard` —— `@RequireRole` / `@RequireScopes` 在路由上生效；
+- `service` —— 规则写在 handler 或 service 里（如成员管理、`POST /projects`），由 `@ApiAuth`
+  注解记录，**注解本身不强制任何东西**；
+- `authentication` —— 只要求有效凭据，范围由组织成员关系与 RLS 决定。
+
+**已知边界**：响应体形状在这个代码库里没有声明（service 直接返回对象字面量），所以文档只描述信封
+`{success, data, error}` 并把 `data` 留空，而不是编一个没有任何东西校验的形状。这是实际限制，写在
+这里而不是糊过去。
+
+一致性由 `apps/api/src/__tests__/openapi.test.ts` 用**独立机制**守住（解析 controller 源码 +
+读 `app.module.ts` 注册表，而非复用生成器走过的元数据）：路由集合双向比对、controller 覆盖、
+已提交的 `docs/openapi.json` 逐字节比对、以及「手写 api-client 调用的每个端点都在文档里」。
+这些断言都做过变异验证——故意漏掉一个 controller 或改坏一条客户端路径，测试会红。
+
+MCP 工具 schema 同样由代码生成，见 `GET /api/v1/mcp/tools`。

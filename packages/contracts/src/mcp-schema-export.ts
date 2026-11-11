@@ -23,7 +23,15 @@ export function mcpToolJsonSchemas(): { remote: McpToolDescriptor[] } {
   };
 }
 
-function toJsonSchema(schema: unknown): Record<string, unknown> | null {
+/**
+ * zod -> JSON Schema, shared with the OpenAPI generator so both describe a schema the same way.
+ *
+ * `jsonSchema7` rather than 2020-12: OpenAPI 3.1 accepts a JSON Schema superset and the MCP tool
+ * schemas are already emitted as draft-07, so one converter keeps the two documents consistent.
+ * Returns `null` for a schema it cannot express, rather than throwing — a tool or route with an
+ * undescribable body should still appear in the document, just without a schema.
+ */
+export function toJsonSchema(schema: unknown): Record<string, unknown> | null {
   if (!schema) return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

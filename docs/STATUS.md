@@ -275,11 +275,50 @@ PROJECT_MANAGER，却会**代建组织成员关系**，并把传入的**项目�
 
 回归测试断言该路由返回 404。至此成员相关的写入路径只剩一条。
 
+### 1.17 OpenAPI 3.1 文档由代码生成（本轮新增）
+
+规格 §8.4 要求「通过 OpenAPI 3.1 生成文档和 TypeScript Client」，§16 的验收清单也列了「API
+OpenAPI 文档和 MCP Tool Schema 完整」。
+
+**没有**用 `@nestjs/swagger`。这个代码库用 `@Body(zodBody(schema))` 管道校验，不是 DTO 类，swagger
+看不见它们——硬套的结果是给 81 条路由手写一遍 `@ApiBody` / `@ApiResponse`，那是**第二份**描述，必然
+漂移。这正是上一轮修掉的 MCP 发现接口犯过的错（手维护的清单声明了 6 条没人实现的 resource）。
+
+改为从**代码本身**装配（`apps/api/src/openapi/document.ts`），一条事实只说一遍：
+
+| 文档里的内容                 | 来源                                                                                                     |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 路径、方法                   | `PATH_METADATA` / `METHOD_METADATA`                                                                      |
+| `public` / `role` / `scopes` | `@Public` / `@RequireRole` / `@RequireScopes` 的 `SetMetadata` 键——**与 `AuthGuard` 请求时读的是同一份** |
+| 请求体、查询 schema          | 路由参数上的 pipe 实例，即真正执行校验的 `ZodValidationPipe`                                             |
+
+产出：`GET /api/v1/openapi.json`（public，客户端读它时还没有凭据）与提交进仓库的 `docs/openapi.json`
+（81 个操作 / 68 条路径），由 `pnpm --filter @localehub/api openapi` 重新生成。
+
+两处需要说明的设计：
+
+1. **`@ApiAuth` 只描述、不强制**。有些路由的鉴权在 service 里（成员管理、`POST /projects`），guard
+   元数据为空，文档里 `role: null` 会被读成「任何成员都可以」——与事实相反。这些路由用 `@ApiAuth`
+   补上真实要求，并用 `x-localehub-auth.enforcedBy` 区分 `guard` / `service` / `authentication`。
+   注解与执行分离，避免「写了注解就以为生效了」。
+2. **响应体形状留空**。service 直接返回对象字面量，响应类型哪里都没声明。文档只描述信封
+   `{success, data, error}` 并把 `data` 留作无约束，而不是编一个没有任何东西校验的形状。
+
+一致性由 `__tests__/openapi.test.ts` 用**独立机制**守住（解析 controller 源码 + 读 app.module
+注册表，不复用生成器的元数据走法）：路由集合双向比对、controller 覆盖、已提交文档逐字节比对、
+手写 api-client 调用的每个端点都在文档里。四条断言都做了变异验证——故意漏掉 `QaController`、
+改坏客户端路径、篡改已提交文档，测试都会红。
+
+顺带修掉一处：`ResponseEnvelopeInterceptor` 会把 `/openapi.json` 也包成 `{success, data}`，任何
+OpenAPI 工具都会找不到 `openapi` 字段。新增 `@RawResponse()` 让「描述 API 的文档」不属于「API 的
+资源」，这是唯一一处豁免。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
 | --------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAPI 3.1 自动生成 + TS Client                    | **未实现** | 当前有 zod schema 与手写 `api-client`，无 `openapi.yaml` 生成                                                                                                                                                                                                                                                                                                                           |
+| OpenAPI 3.1 文档                                    | **已完成** | 由装饰器元数据生成（81 个操作 / 68 条路径），`GET /api/v1/openapi.json` + `docs/openapi.json`，见 §1.17                                                                                                                                                                                                                                                                                 |
+| OpenAPI 驱动的 TS Client 生成                       | 部分       | 客户端仍手写（方法体是真 HTTP 调用），但新增测试断言「客户端调用的每个端点都在文档里」，路径漂移会被 CI 拦住                                                                                                                                                                                                                                                                            |     |
 | Remote MCP 的 OAuth 2.1                             | 部分       | 仅 Bearer Token；无 OAuth 授权码流程                                                                                                                                                                                                                                                                                                                                                    |
 | Remote MCP 的 Resources 模板                        | 部分       | 已注册 `qa-rules`、`localehub://skills` 与 `localehub://skills/{slug}`。项目级资源模板（`localehub://projects/{projectId}` 及其子资源）**未实现**，已从 `/mcp/tools` 的声明中移除——声明一条没有 Server 实现的 resource 会让客户端去读一个必然失败的地址（见 §1.13）                                                                                                                     |
 | Skills 脚本隔离执行器                               | **未实现** | `kind=SCRIPT` 仅登记，任何进程都不执行（见 SKILLS.md）                                                                                                                                                                                                                                                                                                                                  |
@@ -324,7 +363,7 @@ PROJECT_MANAGER，却会**代建组织成员关系**，并把传入的**项目�
 pnpm -r build                     # 全部 packages + apps 编译通过
 pnpm --filter @localehub/web exec next build   # 15 条路由构建成功
 pnpm -r typecheck                              # 16 个 workspace 项目全部通过
-pnpm test                                      # 125 unit tests passed
+pnpm test                                      # 132 unit tests passed（含 7 个 OpenAPI 一致性）
 pnpm test:integration                          # 59 integration tests passed（14 验收 + 12 安全 + 11 Skill 下发 + 22 成员管理）
 node apps/e2e-demo/dist/run-demo.js            # ALL ACCEPTANCE CHECKS PASSED（A–E）
 docker compose config                          # valid
@@ -340,6 +379,8 @@ psql -U localehub_app …                        # 验证 RLS：无 org 上下�
 curl /api/v1/health                            # {"status":"ok","checks":{"database":true}}
 curl -o /dev/null -w %{http_code} /login 等     # 8 个页面均 200
 curl /api/v1/mcp/tools | jq '.data \| keys'    # ["prompts","remote","remoteUrl","resources","skillDelivery","snippets"]，无 local
+curl /api/v1/openapi.json | jq '.paths \| length'  # 68 条路径 / 81 个操作；不带信封（@RawResponse）
+pnpm --filter @localehub/api openapi             # 重新生成 docs/openapi.json（提交进仓库，测试逐字节比对）
 node apps/cli/dist/bin.js mcp-config           # 向平台问自己的地址，输出单条 localehub-remote 配置
 cd .demo-workspace && node …/bin.js info|scan|sync preview   # 本地链路走通（scan 2 文件 / 6 条目）
 POST /organization/members (READONLY)          # 无 token 管理成员的越权尝试 → 403（§1.15 修复前后各跑一次）
@@ -352,7 +393,7 @@ POST /organization/members (READONLY)          # 无 token 管理成员的越权
    没有 `organization_id`；第三条通过 `review_tasks` 关联租户。可选做法：`users` 只允许
    `id IN (SELECT user_id FROM memberships WHERE organization_id = current_organization_id())`，
    或在应用层把读取入口收敛到单一特权函数并加审计。需要先确定「一个用户属于多个组织」时的可见性语义。
-2. OpenAPI 3.1 生成 + TS Client 自动生成，替换手写 `api-client`。
+2. 由 OpenAPI 文档生成 `api-client` 的方法与类型（当前仅路径漂移有测试守住）。
 3. Skills 隔离执行器（独立容器、无网络、非 root）。
 4. CSV/XLSX 适配器与对象存储导入导出。
 5. GitHub/GitLab App + PR 检查（`localehub scan / sync preview --direction=push / qa --changed-only`）。

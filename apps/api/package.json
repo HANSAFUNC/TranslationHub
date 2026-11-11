@@ -7,7 +7,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",
     "dev": "node -r ts-node/register/transpile-only src/main.ts",
-    "start": "node dist/main.js"
+    "start": "node dist/main.js",
+    "openapi": "node dist/openapi/generate.js ../../docs/openapi.json"
   },
   "dependencies": {
     "@localehub/config": "workspace:*",

@@ -3,6 +3,7 @@ import { Role, platformSchema, localeTagSchema } from '@localehub/contracts';
 import { z } from 'zod';
 import { Actor, RequireRole, type ActorContext } from '../../common/auth';
 import { zodBody } from '../../common/zod.pipe';
+import { ApiAuth } from '../../openapi/api-auth';
 import { ProjectsService } from './projects.service';
 
 const createProjectSchema = z.object({
@@ -33,6 +34,7 @@ export class ProjectsController {
     return this.projects.list(actor);
   }
 
+  @ApiAuth({ role: 'PROJECT_MANAGER', note: 'service 内 assertRole：本路由不带 projectId，guard 的 @RequireRole 不生效' })
   @Post()
   async create(@Actor() actor: ActorContext, @Body(zodBody(createProjectSchema)) body: z.infer<typeof createProjectSchema>) {
     return this.projects.create(actor, body);
