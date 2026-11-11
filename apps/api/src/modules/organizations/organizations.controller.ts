@@ -13,6 +13,12 @@ const settingsSchema = z.object({
 const auditQuerySchema = z.object({
   /** Prefix filter, e.g. `member.` for membership changes only. */
   action: z.string().max(60).optional(),
+  /**
+   * Who did it. Since the Remote MCP writes to this table too (`actorType: 'mcp'`), this is what
+   * separates "a person changed this" from "an agent changed this" — a distinction the page could
+   * not make while the only writer was REST.
+   */
+  actorType: z.enum(['user', 'mcp', 'system']).optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
 });
 

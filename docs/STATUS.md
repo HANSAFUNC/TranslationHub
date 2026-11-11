@@ -573,6 +573,57 @@ DOCKER_BUILDKIT=0 docker compose build api worker mcp-remote web && docker compo
 模板会让使用者拿到一个坏仓库却看不出原因。其余覆盖：返回的后续步骤含项目 id 与 token 变量、
 DEVELOPER 建项目被拒、dry-run 不落库、确认后 Key 与译文确实写入、Token 未绑定的项目被拒。
 
+### 1.28 MCP 的写入不进审计（本轮发现并修复）
+
+用户问「现在没有把初始项目汇报到服务器的吗」。检查一次真实初始化后的库：
+
+```
+project 1 | locales 2 | translation_keys 2 | translation_entries 4
+repository_connections 1 | sync_scans 1 | sync_sessions 1 | sync_baselines 4
+project_events 7 | audit_logs 0
+```
+
+项目、条目、事件都在，唯独 `audit_logs` 是 **0**——而同一份数据走 REST 推送时，`sync.push` 已经
+写了 340 行。`grep -c 'audit' apps/mcp-remote/src/server.ts` 返回 `0`：Remote MCP 里一次审计都没写。
+
+这不是「少了个锦上添花的功能」：§1.18 刚建的组织审计页读的就是这张表，所以**通过 MCP 做的每一次
+写入在产品里都是隐形的**，「谁导入了这四十个 key」在系统里没有答案。
+
+根因是结构性而非遗漏——写入逻辑原本放在 Nest 的 `AuditService` 里，一个 `@Injectable()`，MCP 进程
+根本构造不出来。所以：
+
+| 改动                                                     | 为什么                                                                                       |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 抽出 `packages/domain/src/audit.ts`（`recordAudit` + `redactForAudit`） | 两个进程写同一张表，就必须共用同一段写入逻辑，否则形状迟早分叉                               |
+| `AuditService` 改为薄封装                                | 只保留请求特有的东西（`requestId` 来自 async context），其余全部委托                          |
+| MCP 加 `audit()` 小助手                                   | actor 一律取自 Token，不接受工具参数——审计的意义就是记「真正是谁做的」                        |
+| 六个写工具各加一处                                       | `project.create`、`sync.push`、`translation.ai_translate`、`translation.review`、`translation.draft_update`、`translation.submit_review` |
+
+四个刻意保持的性质：
+
+1. **只读不记账。** dry-run 与 `write_drafts:false` 不写，否则审计页把「看一眼」记成「改一次」。
+2. **键名脱敏。** `token` / `secret` / `password` / `authorization` / `cookie` 在落库前替换为
+   `[redacted]`，递归处理嵌套对象与数组。
+3. **失败不外抛。** 审计写不进去只打 stderr：被记录的动作已经完成，不能因为记不上账就让它看起来失败。
+4. **在事务提交之后写。** `recordAudit` 走独立连接，所以 `review_translation_entries` /
+   `update_translation_draft` / `submit_review` 里的审计调用被移到 `withOrganization` **之外**：
+   放在里面的话，业务事务一旦回滚，审计行会留下来，页面就会声称一次没发生的审核「已批准」。
+
+`import_translations` 沿用 REST 的 action 名 `sync.push`（同一件事），用 `metadata.via` 区分入口，
+所以按 action 聚合的统计不会因为入口不同而裂成两份。
+
+**顺带让审计页真的能回答那个问题**：`GET /organization/audit` 增加 `?actorType=mcp` 过滤，返回的每行
+带上 `mcpClient`（名称、Token 前缀、是否已撤销）；`/settings/audit` 因此能一眼分出「人改的」与
+「Agent 改的」，并在 Agent 行上标出具体是哪把 Token——撤销时不会误伤同事的 CI。
+
+验证：8 个新增单元测试（脱敏、默认值、特权路径、失败不上抛）+ 2 个新增集成测试。都用真 MCP 客户端
+建项目、dry-run、确认导入，然后：
+
+- `GET /projects/:projectId/audit` 断言 `project.create` 与 `sync.push` 都在、`actor_type='mcp'`、
+  `actor_id` 与 `mcp_client_id` 都指向真实身份、dry-run 没有留下第二行；
+- `GET /organization/audit?actorType=mcp` 断言返回的每行都是 MCP、`actor.email` 是签发人、
+  `mcpClient.name` 是 Token 名、前缀匹配、未撤销。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -671,11 +722,13 @@ POST /organization/members (READONLY)          # 无 token 管理成员的越权
 | GitHub Actions `CI`（main）                      | **通过**（Run 5）                       |
 | Local / Remote MCP 真实客户端握手                | 通过（见附二）                          |
 | 端到端演示连续两次运行                           | 均通过（demo 自带项目清理，可重复执行） |
-| `pnpm test`                                      | 125 passed                              |
-| `pnpm test:integration`                          | 58 passed                               |
+| `pnpm test`                                      | 189 passed                              |
+| `pnpm test:integration`                          | 105 passed                              |
 | `node apps/e2e-demo/dist/run-demo.js`            | ALL ACCEPTANCE CHECKS PASSED            |
 | `docker compose config`（含 production overlay） | valid                                   |
 | `docker compose up -d --build`（整套栈）         | 5 个服务全部起，浏览器实测 24/24        |
+| `docker buildx build --network host`             | api / web 镜像均构建成功（见下方说明）  |
+| 容器栈上的 MCP 写入 → 审计页（无头 Chrome）      | 通过：`/settings/audit` 的「Agent 操作」筛出 100 行，每行标出 Token 名与前缀 |
 | `docker build -f docker/api.Dockerfile .`        | 见下方说明                              |
 
 Docker 镜像构建第一次因 Dockerfile 在 `prisma generate` 之前编译 `packages/database` 而失败
@@ -690,14 +743,31 @@ docker build -f docker/web.Dockerfile -t localehub-web:local .
 两个镜像均已成功构建并运行验证。首次 Web 重构建曾在下载 `@next/swc-linux-arm64-*` 时遇到
 `ECONNRESET`，重试后完成；这是网络抖动，不是代码问题。
 
+**本轮又踩了同一个坑，顺手把它修掉**：BuildKit 报 `apk add` 的包「masked in: --no-network」，
+旧版构建器能连网但 `pnpm install` 反复在 640–660/664 处被 registry 掐断。两处改动：
+
+1. `docker/api.Dockerfile` 的 `deps` 阶段原本 `COPY packages ./packages`（**整个源码树**），
+   于是改一个 `.ts` 文件就会让依赖层失效、重下整棵依赖树。现在只 COPY 各包的 `package.json`
+   ——这一层从此与源码无关，重构建只跑编译。
+2. 两个 Dockerfile 的 `pnpm install` 都加上 `--fetch-retries=10 --fetch-timeout=600000`。
+   默认重试 2 次，对「只是慢」的 registry 等于放弃。
+
+网络本身仍不通 BuildKit 的默认网络（容器里 `curl` 25 秒只下到 5 MB），所以构建命令是：
+
+```bash
+docker buildx build --network host -f docker/api.Dockerfile -t localehub-api .
+docker buildx build --network host -f docker/web.Dockerfile -t localehub-web .
+```
+
 ## 附二：MCP 传输层实测
 
-平台只有一个 MCP，下表的「工具」一列是它的 15 个平台工具；本地动作在 CLI 里，另表列出。
+平台只有一个 MCP，下表的「工具」一列是它的 17 个平台工具；本地动作在 CLI 里，另表列出。
 
 | 验证                                                | 结果                                                                                            |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | Remote MCP（Streamable HTTP）被真实 MCP Client 连接 | `connected: localehub-remote 0.1.0`                                                             |
-| Remote MCP 工具数                                   | 15（与规格 §6.4 一致）                                                                          |
+| Remote MCP 工具数                                   | 17（规格 §6.4 的 15 个 + `create_project` / `import_translations`，见 §1.27）                   |
+| MCP 写入是否进审计                                  | 是：6 个写工具写 `audit_logs`，`actor_type='mcp'`，只读与 dry-run 不写（集成测试断言，见 §1.28） |
 | Remote MCP 是否暴露本地文件工具                     | 否（检查 `read_local_file` / `write_local_file` / `read_file` / `exec` 均不存在）               |
 | `list_projects` / `get_project_sync_status`         | 正常返回                                                                                        |
 | Remote MCP Resources / Prompts                      | 7 / 7（`qa-rules` + `skills` + `skills/{slug}` + 3 个 Skill resource；2 内置 + 5 Skill prompt） |
@@ -746,3 +816,4 @@ docker build -f docker/web.Dockerfile -t localehub-web:local .
 | 去掉 Local MCP（用户决定）                                               | 两个 MCP 意味着版本/能力无法统一管理，发现接口失真 | 删除 `apps/mcp-local`；引擎移到 `packages/local-sync`，由 CLI 驱动             |
 | `/mcp/tools` 声明了 6 条未实现的 resource 与 1 个已删除 Server 的 prompt | 发现接口高估能力                                   | 资源/prompt 清单进契约，集成测试断言「声明 == 实际注册」                       |
 | 浏览器端硬编码 API 主机                                                  | 反向代理部署下前端打不到 API                       | 未配置 `NEXT_PUBLIC_API_BASE_URL` 时回退到同源 `/api/v1`                       |
+| MCP 的写入不写审计（`audit_logs` 对 Agent 全盲）                         | 审计页看不到任何 MCP 操作，无法追溯、无法撤销对应 Token | 抽 `packages/domain/src/audit.ts`，六个写工具补审计 + 8 单元 / 2 集成测试（见 §1.28） |

@@ -5,6 +5,9 @@
  * step 3 is the config snippet the page renders, step 4 is the verification prompt — "list my
  * projects, then read that project's locales".
  */
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+
 const BASE = process.env.API_BASE ?? 'http://localhost:3001/api/v1';
 
 async function call(path, options = {}) {
@@ -53,8 +56,13 @@ const config = await call('/mcp/tools');
 console.log('step 3 — snippet url:', JSON.parse(config.body.data.snippets.remote).mcpServers['localehub-remote'].url);
 
 // Step 4: the verification prompt, over the real transport.
-const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+// Resolve the SDK from `apps/mcp-remote`, which declares it. A bare specifier here would be
+// resolved against `scripts/`, which has no node_modules — the same reason
+// `check-webhook-worker.mjs` resolves `@localehub/domain` from `apps/worker`.
+const require = createRequire(new URL('../apps/mcp-remote/package.json', import.meta.url));
+const sdk = (id) => pathToFileURL(require.resolve(id)).href;
+const { Client } = await import(sdk('@modelcontextprotocol/sdk/client/index.js'));
+const { StreamableHTTPClientTransport } = await import(sdk('@modelcontextprotocol/sdk/client/streamableHttp.js'));
 const client = new Client({ name: 'onboarding-check', version: '0' });
 await client.connect(
   new StreamableHTTPClientTransport(new URL(config.body.data.remoteUrl), {

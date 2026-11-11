@@ -31,6 +31,7 @@ interface AuditEntry {
   action: string;
   actorType: string;
   actor: { id: string; email: string; name: string } | null;
+  mcpClient: { id: string; name: string; tokenPrefix: string; revokedAt: string | null } | null;
   resourceType: string;
   resourceId: string | null;
   projectId: string | null;
@@ -51,22 +52,40 @@ const ACTION_LABEL: Record<string, string> = {
   'member.project_role_remove': '移除项目角色',
   'user.password_change': '本人修改密码',
   'organization.settings.update': '修改组织策略',
+  // Written by the Remote MCP as well as by REST. `import_translations` and a REST push both
+  // record `sync.push`, because they are the same operation; `via` in the metadata says which.
+  'project.create': '创建项目',
+  'sync.scan': '扫描仓库',
+  'sync.preview': '生成推送计划',
+  'sync.push': '推送变更',
+  'sync.apply': '回写仓库',
+  'translation.ai_translate': 'AI 生成草稿',
+  'translation.review': '审核译文',
+  'translation.draft_update': '修改译文草稿',
+  'translation.submit_review': '提交审核',
 };
 
-const FILTERS = [
-  { label: '全部', value: '' },
-  { label: '成员与权限', value: 'member.' },
-  { label: '账号', value: 'user.' },
-  { label: '组织策略', value: 'organization.' },
+/**
+ * Filters are one of two shapes, because the question "what did agents do" is not a prefix of an
+ * action name — it needs `actorType`.
+ */
+const FILTERS: { label: string; action?: string; actorType?: string }[] = [
+  { label: '全部' },
+  { label: '成员与权限', action: 'member.' },
+  { label: '账号', action: 'user.' },
+  { label: '组织策略', action: 'organization.' },
+  { label: 'Agent 操作', actorType: 'mcp' },
 ];
 
 export default function AuditPage() {
-  const [filter, setFilter] = useState('');
+  const [filterIndex, setFilterIndex] = useState(0);
+  const filter = FILTERS[filterIndex] ?? {};
   const { data: me } = useAsync(() => get<Me>('/auth/me'), []);
-  const { data, error, loading } = useAsync(
-    () => get<AuditEntry[]>(`/organization/audit${filter ? `?action=${encodeURIComponent(filter)}` : ''}`),
-    [filter],
-  );
+  const query = new URLSearchParams();
+  if (filter.action) query.set('action', filter.action);
+  if (filter.actorType) query.set('actorType', filter.actorType);
+  const suffix = query.size ? `?${query.toString()}` : '';
+  const { data, error, loading } = useAsync(() => get<AuditEntry[]>(`/organization/audit${suffix}`), [suffix]);
 
   const canRead = me ? me.isPlatformAdmin || me.role === 'ORG_OWNER' || me.role === 'ORG_ADMIN' : null;
 
@@ -93,12 +112,12 @@ export default function AuditPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <div className="flex flex-wrap gap-2">
-              {FILTERS.map((item) => (
+              {FILTERS.map((item, index) => (
                 <Button
-                  key={item.value}
+                  key={item.label}
                   size="sm"
-                  variant={filter === item.value ? 'default' : 'outline'}
-                  onClick={() => setFilter(item.value)}
+                  variant={index === filterIndex ? 'default' : 'outline'}
+                  onClick={() => setFilterIndex(index)}
                 >
                   {item.label}
                 </Button>
@@ -127,11 +146,33 @@ export default function AuditPage() {
                       <TableCell className="text-xs">
                         {entry.actor ? (
                           <span className="flex flex-col gap-0.5">
-                            <span>{entry.actor.name}</span>
+                            <span className="flex items-center gap-1.5">
+                              {entry.actor.name}
+                              {/*
+                                The row records which user a token belonged to, so without this the
+                                page reads as if that person did it by hand. An agent's forty-key
+                                import and a person's edit look identical otherwise.
+                              */}
+                              {entry.actorType === 'mcp' ? (
+                                <Badge variant="outline" className="text-[10px]">
+                                  Agent
+                                </Badge>
+                              ) : null}
+                            </span>
                             <span className="text-muted-foreground font-mono text-[10px]">{entry.actor.email}</span>
+                            {entry.mcpClient ? (
+                              // The token, not just the person: revoking the wrong credential
+                              // would stop a colleague's CI instead of the agent that misbehaved.
+                              <span className="text-muted-foreground font-mono text-[10px]">
+                                {entry.mcpClient.name} · {entry.mcpClient.tokenPrefix}…
+                                {entry.mcpClient.revokedAt ? '（已撤销）' : ''}
+                              </span>
+                            ) : null}
                           </span>
                         ) : (
-                          <span className="text-muted-foreground">系统</span>
+                          <span className="text-muted-foreground">
+                            {entry.actorType === 'mcp' ? 'Agent（Token 已删除）' : '系统'}
+                          </span>
                         )}
                       </TableCell>
                       <TableCell>

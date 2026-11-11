@@ -31,7 +31,7 @@
 | POST   | `/auth/logout`              | 登录                   | 清除会话 Cookie 与 CSRF Cookie               |
 | GET    | `/organization`             | 成员                   | 当前组织及其安全策略                         |
 | PATCH  | `/organization/settings`    | ORG_OWNER / ORG_ADMIN  | 修改组织安全策略（当前为 `allowDraftApply`） |
-| GET    | `/organization/audit`       | ORG_OWNER / ORG_ADMIN  | 组织审计日志（`?action=member.` 前缀筛选）   |
+| GET    | `/organization/audit`       | ORG_OWNER / ORG_ADMIN  | 组织审计日志（`?action=member.` 前缀筛选、`?actorType=mcp` 只看 Agent） |
 | PATCH  | `/auth/password`            | 登录（非 MCP Token）   | 修改**自己**的密码（需提供当前密码）         |
 | GET    | `/organization/overview`    | 成员                   | 组织级统计                                   |
 

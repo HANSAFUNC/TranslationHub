@@ -8,7 +8,10 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY apps/web/package.json ./apps/web/package.json
-RUN pnpm install --frozen-lockfile --ignore-scripts --filter @localehub/web...
+# Same retry budget as `docker/api.Dockerfile`: the default of 2 gives up on a registry that is
+# merely slow, and the web dependency set is the largest in the workspace.
+RUN pnpm install --frozen-lockfile --ignore-scripts --filter @localehub/web... \
+      --fetch-retries=10 --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=120000 --fetch-timeout=600000
 
 FROM deps AS build
 COPY tsconfig.base.json ./

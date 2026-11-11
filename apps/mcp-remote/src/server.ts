@@ -5,6 +5,7 @@ import {
   SyncService,
   assertPlaceholdersPreserved,
   createProject,
+  recordAudit,
   emitProjectEvent,
   upsertTranslation,
 } from '@localehub/domain';
@@ -115,6 +116,29 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     'submit_review',
   ]);
 
+  /**
+   * Record one audit row for a write.
+   *
+   * The actor always comes from the token, never from the tool's arguments — the point of the
+   * trail is that it says who really did it. `mcpClientId` is included so an operator can tell
+   * which token was used, and therefore revoke it.
+   */
+  const audit = (input: {
+    action: string;
+    resourceType: string;
+    resourceId?: string | null;
+    projectId?: string | null;
+    syncSessionId?: string | null;
+    metadata?: Record<string, unknown>;
+  }) =>
+    recordAudit(prisma, {
+      organizationId: actor.organizationId,
+      actorId: actor.userId,
+      actorType: 'mcp',
+      mcpClientId: actor.mcpClientId ?? null,
+      ...input,
+    });
+
   const define = <K extends RemoteMcpTool>(name: K, description: string, handler: (input: never) => Promise<unknown>) => {
     const schema = remoteToolSchemas[name] as unknown as {
       shape?: Record<string, unknown>;
@@ -175,6 +199,14 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
         platforms: created.platforms as never,
         apiUrl: process.env.API_PUBLIC_URL || 'http://localhost:3001/api/v1',
         ...(input.locales_dir ? { localesDir: input.locales_dir } : {}),
+      });
+
+      await audit({
+        action: 'project.create',
+        resourceType: 'project',
+        resourceId: created.id,
+        projectId: created.id,
+        metadata: { name: created.name, sourceLocale: created.sourceLocale, locales: created.locales, via: 'create_project' },
       });
 
       return {
@@ -275,6 +307,18 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
         { syncPlanId: preview.planId, planHash: preview.planHash, client: { name: 'localehub-remote-mcp', version: '0.1.0' } } as never,
         actor,
       );
+
+      // The same action name the REST push uses, because it is the same operation; `via` records
+      // which surface performed it, which is what an operator needs when they ask "who pushed
+      // forty keys at 3am" and the answer is an agent rather than a person.
+      await audit({
+        action: 'sync.push',
+        resourceType: 'sync_session',
+        resourceId: pushed.syncSessionId,
+        projectId: project.id,
+        syncSessionId: pushed.syncSessionId,
+        metadata: { via: 'import_translations', entryCount, files: planned, summary: pushed.summary },
+      });
 
       return {
         dryRun: false,
@@ -426,12 +470,23 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
       write_drafts: boolean;
     }) => {
       assertRole(actor, input.project_id, Role.PRODUCT_MANAGER);
-      return ai.draftTranslations(actor, input.project_id, {
+      const result = await ai.draftTranslations(actor, input.project_id, {
         entryIds: input.entry_ids,
         targetLocales: input.target_locales,
         provider: input.provider,
         writeDrafts: input.write_drafts,
       });
+      // `write_drafts` decides whether anything was written; a read-only generation should not
+      // leave a trail that reads as a change.
+      if (input.write_drafts) {
+        await audit({
+          action: 'translation.ai_translate',
+          resourceType: 'translation_entry',
+          projectId: input.project_id,
+          metadata: { entries: input.entry_ids.length, locales: input.target_locales, provider: input.provider ?? 'default' },
+        });
+      }
+      return result;
     },
   );
 
@@ -446,7 +501,7 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
       comment?: string;
     }) => {
       assertRole(actor, input.project_id, Role.REVIEWER);
-      return tenant.withOrganization(actor.organizationId, async (tx) => {
+      const results = await tenant.withOrganization(actor.organizationId, async (tx) => {
         const results: { entryId: string; status: string }[] = [];
         for (const entryId of input.entry_ids) {
           const entry = await tx.translationEntry.findUnique({ where: { id: entryId }, include: { key: true } });
@@ -483,8 +538,23 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
           });
           results.push({ entryId, status });
         }
-        return { results };
+        return results;
       });
+
+      // Outside the transaction on purpose: `recordAudit` runs on its own connection, so a row
+      // written from inside would survive a rollback and claim a review that never happened.
+      await audit({
+        action: 'translation.review',
+        resourceType: 'translation_entry',
+        projectId: input.project_id,
+        metadata: {
+          decision: input.decision,
+          reviewed: results.length,
+          skipped: input.entry_ids.length - results.length,
+          comment: input.comment ?? null,
+        },
+      });
+      return { results };
     },
   );
 
@@ -512,7 +582,7 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     '更新译文草稿（新版本，不覆盖历史）',
     async (input: { project_id: string; key: string; locale: string; value: string; expected_revision?: number }) => {
       assertRole(actor, input.project_id, Role.TRANSLATOR);
-      return tenant.withOrganization(actor.organizationId, async (tx) => {
+      const outcome = await tenant.withOrganization(actor.organizationId, async (tx) => {
         const entry = await tx.translationEntry.findFirst({
           where: { projectId: input.project_id, localeCode: input.locale, key: { key: input.key } },
           include: { key: { include: { sourceVersions: { orderBy: { version: 'desc' }, take: 1 } } } },
@@ -538,8 +608,21 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
           authorId: actor.userId,
           authorType: 'mcp',
         });
-        return { entryId: entry.id, translationVersionId: result.translationVersionId, changed: result.changed };
+        return { entryId: entry.id, versionId: result.translationVersionId, changed: result.changed };
       });
+
+      // Only a write that actually changed something is a change worth recording, and only after
+      // the transaction committed — see the note on `review_translation_entries`.
+      if (outcome.changed) {
+        await audit({
+          action: 'translation.draft_update',
+          resourceType: 'translation_entry',
+          resourceId: outcome.entryId,
+          projectId: input.project_id,
+          metadata: { key: input.key, locale: input.locale, translationVersionId: outcome.versionId },
+        });
+      }
+      return { entryId: outcome.entryId, translationVersionId: outcome.versionId, changed: outcome.changed };
     },
   );
 
@@ -548,7 +631,7 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     '提交审核',
     async (input: { project_id: string; entry_ids: string[]; locales?: string[]; comment?: string }) => {
       assertRole(actor, input.project_id, Role.TRANSLATOR);
-      return tenant.withOrganization(actor.organizationId, async (tx) => {
+      const submitted = await tenant.withOrganization(actor.organizationId, async (tx) => {
         let submitted = 0;
         for (const entryId of input.entry_ids) {
           const entry = await tx.translationEntry.findUnique({ where: { id: entryId }, include: { key: true } });
@@ -577,8 +660,25 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
           });
           submitted += 1;
         }
-        return { submitted };
+        return submitted;
       });
+
+      // Submitted-and-skipped counts both belong in the row: "we asked for ten, six moved" is the
+      // difference between a working client and one sending stale entry ids. Outside the
+      // transaction, so a rollback cannot leave a row describing a submission that did not happen.
+      if (submitted > 0) {
+        await audit({
+          action: 'translation.submit_review',
+          resourceType: 'translation_entry',
+          projectId: input.project_id,
+          metadata: {
+            submitted,
+            skipped: input.entry_ids.length - submitted,
+            comment: input.comment ?? null,
+          },
+        });
+      }
+      return { submitted };
     },
   );
 

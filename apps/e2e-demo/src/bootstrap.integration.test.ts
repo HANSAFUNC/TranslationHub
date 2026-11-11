@@ -334,6 +334,71 @@ describe('creating a project', () => {
     expect(values).toContain('お会計');
   }, 60_000);
 
+  /**
+   * The writes above went through the MCP, and the organization audit page reads `audit_logs`.
+   * Before this test existed, every tool wrote its domain rows and nothing else: the project and
+   * its four entries were there, the audit trail was empty, and the page that answers "who did
+   * this" showed nothing for the surface an agent uses.
+   */
+  it('leaves an audit trail for what it wrote', async () => {
+    const audited = await call<
+      {
+        action: string;
+        actorType: string;
+        actorId: string | null;
+        mcpClientId: string | null;
+        projectId: string | null;
+        metadata: Record<string, unknown>;
+      }[]
+    >(`/projects/${projectId}/audit`, { token: session.token });
+    expect(audited.status, JSON.stringify(audited.body.error)).toBe(200);
+
+    const rows = audited.body.data ?? [];
+    const actions = rows.map((row) => row.action);
+    expect(actions).toContain('project.create');
+    expect(actions).toContain('sync.push');
+
+    // The actor is the token's user, and the tool is identified — otherwise the row says "someone
+    // did it" and an operator cannot tell which token to revoke.
+    const push = rows.find((row) => row.action === 'sync.push');
+    expect(push).toMatchObject({ actorType: 'mcp', projectId });
+    expect(push?.actorId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(push?.mcpClientId).toMatch(/^[0-9a-f-]{36}$/);
+    // The metadata says which surface performed it, because the REST push records the same action.
+    expect(push?.metadata.via).toBe('import_translations');
+    expect(push?.metadata.entryCount).toBe(4);
+
+    // The dry run is a read: it must not look like a change.
+    const pushes = rows.filter((row) => row.action === 'sync.push');
+    expect(pushes).toHaveLength(1);
+  });
+
+  it('names the token that acted, so the right credential can be revoked', async () => {
+    // The organization trail is the one that resolves the token. `actor` alone would name the
+    // person who issued it, which for a CI token is not who did the work.
+    const trail = await call<
+      {
+        action: string;
+        actorType: string;
+        actor: { email: string } | null;
+        mcpClient: { name: string; tokenPrefix: string; revokedAt: string | null } | null;
+      }[]
+    >('/organization/audit?actorType=mcp', { token: session.token });
+    expect(trail.status, JSON.stringify(trail.body.error)).toBe(200);
+
+    const push = trail.body.data!.find((entry) => entry.action === 'sync.push');
+    expect(push).toBeTruthy();
+    expect(push!.actorType).toBe('mcp');
+    // The person who issued the token is still named — the row says both who and with what.
+    expect(push!.actor?.email).toBe(session.email);
+    expect(push!.mcpClient?.name).toBe('bootstrap-suite');
+    expect(push!.mcpClient?.tokenPrefix).toMatch(/^lh_mcp_/);
+    expect(push!.mcpClient?.revokedAt).toBeNull();
+
+    // The filter is a filter, not a relabelling: a user-actor row must not appear under it.
+    expect(trail.body.data!.every((entry) => entry.actorType === 'mcp')).toBe(true);
+  });
+
   it('refuses a project the token is not bound to', async () => {
     const other = await call<{ id: string }>('/projects', {
       method: 'POST',

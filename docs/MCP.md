@@ -186,6 +186,34 @@ Resources / Prompts 清单可通过 `GET /api/v1/mcp/tools` 获取（含 JSON Sc
 因此接入者看到的项目列表、示例里的 id、能读到的译文，都是他自己的。平台侧不存在需要他「改成自己的」
 配置项——URL 由部署方通过 `MCP_PUBLIC_URL` 决定，其余全部由 Token 推导。
 
+### 2.4 每一次写入都会留痕
+
+MCP 的写工具与 REST 写入**同一张 `audit_logs`**，所以「谁在什么时候推了什么」在两种入口下答案一致
+——组织审计页读的就是这张表。此前 MCP 只写业务表、不写审计，结果是项目建好了、条目导入了，
+审计页却一片空白。
+
+| 工具                         | 审计 action                 | 记录内容                                             |
+| ---------------------------- | --------------------------- | ---------------------------------------------------- |
+| `create_project`             | `project.create`            | 项目名、源语言、语言列表                             |
+| `import_translations`        | `sync.push`                 | `via: import_translations`、条目数、文件清单、summary |
+| `translate_entries`          | `translation.ai_translate`  | 条目数、目标语言、provider（仅 `write_drafts` 时）    |
+| `review_translation_entries` | `translation.review`        | 决定、处理数、跳过数、备注                           |
+| `update_translation_draft`   | `translation.draft_update`  | key、locale、新版本 id（仅真正发生改动时）           |
+| `submit_review`              | `translation.submit_review` | 提交数、跳过数、备注                                 |
+
+- `actor_type` 为 `mcp`，`actor_id` 是 Token 所属用户，`mcp_client_id` 是具体那一把 Token
+  ——「有人半夜推了四十个 key」因此能落到「哪把 Token」，可以直接撤销它。
+- **只读不记账**：`list_projects`、`get_qa_issues`、`get_pending_platform_changes` 等只读工具不写审计；
+  dry-run 同理，`import_translations {confirm:false}` 与 `translate_entries {write_drafts:false}`
+  不留记录，否则审计页会把「看一眼」算成「改一次」。
+- 写入前按**键名**脱敏（`token` / `secret` / `password` / `authorization` / `cookie` 等一律替换为
+  `[redacted]`），Token 明文不可能进入这张表。
+- 审计写入失败只记 stderr、不抛出：被记录的动作已经完成，不能因为记不上账就让它看起来失败了。
+- 审计在**事务提交之后**写。`recordAudit` 用独立连接，如果放进业务事务里，回滚后这条记录会留下来，
+  审计页就会声称一次没发生的审核「已批准」。
+- `import_translations` 用的 action 与 REST 推送相同（`sync.push`），因为那本来就是同一件事；
+  区分入口的是 `metadata.via`。
+
 ## 3. 本地仓库操作：CLI（不是 MCP）
 
 读写开发者仓库的 14 个动作都在 CLI 里，`localehub <command>`。它们与 MCP 无关，也不需要
@@ -255,7 +283,7 @@ Server 每个请求建一次（无状态），所以 Skill 是**实时**的：�
 不需要重启任何客户端。
 
 取数走数据库、受 RLS 约束，与 `GET /skills` 的可见性规则一致。查询失败时只记 stderr 并返回空清单
-——Skill 是附加能力，不能因为读不到它而让 15 个工具一起报错。
+——Skill 是附加能力，不能因为读不到它而让 17 个工具一起报错。
 
 ## 5. Token 与 Scope
 

@@ -17,6 +17,14 @@ export interface AuditEntry {
   action: string;
   actorType: string;
   actor: { id: string; email: string; name: string } | null;
+  /**
+   * The token an agent acted with, when one did.
+   *
+   * `actor` alone is misleading for MCP rows: it names the person who issued the token, so a
+   * forty-key import by a CI job reads exactly like that person doing it by hand. The name is what
+   * an operator needs to find and revoke the right credential.
+   */
+  mcpClient: { id: string; name: string; tokenPrefix: string; revokedAt: string | null } | null;
   resourceType: string;
   resourceId: string | null;
   projectId: string | null;
@@ -55,7 +63,7 @@ export class OrganizationsService {
    */
   async listAudit(
     actor: ActorContext,
-    options: { action?: string; limit?: number } = {},
+    options: { action?: string; actorType?: 'user' | 'mcp' | 'system'; limit?: number } = {},
   ): Promise<AuditEntry[]> {
     if (!isMemberManagerRole(actor.orgRole) && !actor.isPlatformAdmin) {
       throw new LocaleHubError(
@@ -67,7 +75,10 @@ export class OrganizationsService {
     const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
     return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
       const rows = await tx.auditLog.findMany({
-        where: options.action ? { action: { startsWith: options.action } } : {},
+        where: {
+          ...(options.action ? { action: { startsWith: options.action } } : {}),
+          ...(options.actorType ? { actorType: options.actorType } : {}),
+        },
         orderBy: { createdAt: 'desc' },
         take: limit,
       });
@@ -78,11 +89,36 @@ export class OrganizationsService {
         ? await tx.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, email: true, name: true } })
         : [];
       const byId = new Map(actors.map((user) => [user.id, user]));
+
+      // Same reasoning as `actors`: the ids come from the scoped query above, and `mcp_clients`
+      // carries its own row-level policy that would otherwise hide the row from an admin reading
+      // their own organization's trail.
+      const clientIds = [
+        ...new Set(rows.map((row) => row.mcpClientId).filter((id): id is string => Boolean(id))),
+      ];
+      const clients = clientIds.length
+        ? await tx.mcpClient.findMany({
+            where: { id: { in: clientIds } },
+            select: { id: true, name: true, tokenPrefix: true, revokedAt: true },
+          })
+        : [];
+      const clientById = new Map(clients.map((client) => [client.id, client]));
+
       return rows.map((row) => ({
         id: row.id,
         action: row.action,
         actorType: row.actorType,
         actor: row.actorId ? (byId.get(row.actorId) ?? null) : null,
+        mcpClient: (() => {
+          const client = row.mcpClientId ? clientById.get(row.mcpClientId) : undefined;
+          if (!client) return null;
+          return {
+            id: client.id,
+            name: client.name,
+            tokenPrefix: client.tokenPrefix,
+            revokedAt: client.revokedAt ? client.revokedAt.toISOString() : null,
+          };
+        })(),
         resourceType: row.resourceType,
         resourceId: row.resourceId,
         projectId: row.projectId,
