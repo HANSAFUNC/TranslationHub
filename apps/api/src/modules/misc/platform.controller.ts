@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ErrorCode,
   LocaleHubError,
@@ -12,12 +13,21 @@ import {
 import { z } from 'zod';
 import { assertRole, type ActorContext } from '@localehub/permissions';
 import { createAdapter } from '@localehub/format-adapters';
-import { emitProjectEvent } from '@localehub/domain';
+import {
+  buildReleaseBundle,
+  bundleExists,
+  emitProjectEvent,
+  readBundle,
+  snapshotFiles,
+  writeBundle,
+} from '@localehub/domain';
 import { Actor, RequireRole, type AuthenticatedRequest } from '../../common/auth';
 import { PrismaService } from '../../common/prisma.service';
 import { AuditService } from '../../common/audit.service';
 import { QueueService, QUEUE_NAMES } from '../../common/queue.service';
 import { zodBody } from '../../common/zod.pipe';
+import { RawResponse } from '../../common/response.interceptor';
+import { ApiAuth } from '../../openapi/api-auth';
 
 const skillSchema = z.object({
   slug: z.string().min(1).max(80),
@@ -178,6 +188,100 @@ export class PlatformController {
   }
 
   /* ------------------------------------------------------------ import/export */
+
+  /**
+   * Build the release bundle: one zip per release, written to the bundle directory.
+   *
+   * Spec §8.4 asks for pre-signed URLs rather than Base64 inside a JSON body. A directory keyed by
+   * organization and release id gives the same property — the download is a separate request and
+   * the bytes never travel through JSON — and swapping in S3 later means replacing one module.
+   *
+   * Deterministic: the same snapshots always produce the same archive, so the checksum recorded on
+   * the release row can be re-verified by whoever downloads it.
+   */
+  @ApiAuth({ role: 'PROJECT_MANAGER', note: 'guard 的 @RequireRole 在本路由带 projectId 时生效' })
+  @Post('projects/:projectId/releases/:releaseId/bundle')
+  @RequireRole(Role.PROJECT_MANAGER)
+  async buildBundle(
+    @Actor() actor: ActorContext,
+    @Param('projectId') projectId: string,
+    @Param('releaseId') releaseId: string,
+  ) {
+    assertRole(actor, projectId, Role.PROJECT_MANAGER);
+    const release = await this.prisma.tenant.withOrganization(actor.organizationId, (tx) =>
+      tx.release.findFirst({
+        where: { id: releaseId, projectId },
+        include: { snapshots: true },
+      }),
+    );
+    if (!release) throw new LocaleHubError(ErrorCode.NOT_FOUND, `Release ${releaseId} not found`, 404);
+    if (!release.snapshots.length) {
+      throw new LocaleHubError(ErrorCode.CONFLICT, 'This release has no snapshots to bundle', 409);
+    }
+
+    const files = snapshotFiles(release.snapshots);
+    const archive = buildReleaseBundle(
+      {
+        releaseName: release.name,
+        locales: release.locales,
+        generatedAt: release.publishedAt ?? release.createdAt,
+        source: { releaseId: release.id, projectId, checksum: release.snapshotChecksum },
+      },
+      files,
+    );
+    const written = writeBundle(actor.organizationId, release.id, archive);
+
+    await this.audit.record({
+      organizationId: actor.organizationId,
+      actorId: actor.userId,
+      actorType: actor.actorType ?? 'user',
+      action: 'release.bundle',
+      resourceType: 'release',
+      resourceId: release.id,
+      projectId,
+      metadata: { files: files.length, bytes: written.bytes },
+    });
+
+    return {
+      releaseId: release.id,
+      files: files.map((file) => file.path),
+      bytes: written.bytes,
+      downloadPath: `/api/v1/projects/${projectId}/releases/${release.id}/bundle`,
+    };
+  }
+
+  /** Download a built bundle. Raw bytes: a zip wrapped in the JSON envelope is not a zip. */
+  @RawResponse()
+  @Get('projects/:projectId/releases/:releaseId/bundle')
+  async downloadBundle(
+    @Actor() actor: ActorContext,
+    @Param('projectId') projectId: string,
+    @Param('releaseId') releaseId: string,
+    @Res() response: Response,
+  ) {
+    assertRole(actor, projectId, Role.READONLY);
+    // Ownership is checked against the release row rather than trusted from the path, so a release
+    // id from another project — or another organization — cannot be fetched by guessing.
+    const release = await this.prisma.tenant.withOrganization(actor.organizationId, (tx) =>
+      tx.release.findFirst({ where: { id: releaseId, projectId }, select: { id: true, name: true } }),
+    );
+    if (!release) throw new LocaleHubError(ErrorCode.NOT_FOUND, `Release ${releaseId} not found`, 404);
+    if (!bundleExists(actor.organizationId, releaseId)) {
+      throw new LocaleHubError(
+        ErrorCode.NOT_FOUND,
+        'No bundle has been built for this release yet; POST to this path first',
+        404,
+      );
+    }
+    const archive = readBundle(actor.organizationId, releaseId)!;
+    response.setHeader('content-type', 'application/zip');
+    response.setHeader('content-length', String(archive.length));
+    response.setHeader(
+      'content-disposition',
+      `attachment; filename="${release.name.replace(/[^\w.-]+/g, '_')}.zip"`,
+    );
+    response.end(archive);
+  }
 
   @Get('projects/:projectId/export')
   async export(

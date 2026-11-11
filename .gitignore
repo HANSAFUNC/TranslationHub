@@ -25,3 +25,4 @@ packages/database/generated/
 # e2e demo scratch workspace (created by `pnpm demo`)
 .demo-workspace/
 .demo-workspace-integration/
+.localehub-bundles/

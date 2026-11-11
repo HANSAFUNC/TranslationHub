@@ -423,6 +423,31 @@ Webhook 作业把 `organizationId` 放进载荷——读那一行本来就需要
 投递，再用消费者的方式验签——通过（`delivered SYNC_PUSHED | signature verified: true`）。
 异步 QA 实测 `queued: true` 且 `qa_runs` 达到 `SUCCEEDED`。
 
+### 1.23 发布包导出（本轮新增）
+
+| 能力 | 位置                                                                                      |
+| ---- | ----------------------------------------------------------------------------------------- |
+| 打包 | `POST /projects/:projectId/releases/:releaseId/bundle`（PROJECT_MANAGER）                 |
+| 下载 | `GET /projects/:projectId/releases/:releaseId/bundle`（READONLY，返回 `application/zip`） |
+
+- **确定性**。条目按名字排序、时间戳固定为 1980-01-01、存储而非压缩，因此同一份快照永远产出同样的
+  字节——`releases.snapshot_checksum` 才有意义：下载的人可以自己复算。测试直接断言「重新打包字节相同」。
+- **自描述**。`manifest.json` 记录发布名、生成时间、语言、来源 id 与 checksum，以及**每个文件的 sha256**，
+  便于部分下载时校验。
+- **按项目鉴权，不按路径**。发布 id 会对着 `release` 行核对 `projectId`，所以猜到一个 id 也取不到别的
+  项目、别的组织的包。
+- **不走 JSON 信封**。zip 被包进 `{success, data}` 就不是 zip 了，这条路由用 `@RawResponse()`。
+- 存储是按 `组织 id/发布 id.zip` 寻址的目录。规格 §8.4 要求预签名 URL 而不是把大文件塞进 JSON 响应体
+  ——目录存储给出同样的性质（下载是独立请求，字节不经过 JSON），换 S3 只需替换 `bundles.ts` 里的
+  存储层。**导入导出仍走 JSON 响应体**，这一条还没做完。
+
+zip 是手写的（约 120 行）而不是引依赖：需要的形状很小，而约束很具体——存储式条目、固定时间戳、
+排序文件名，通用库在这三点上都要对抗。测试用一个独立的读取器解析产物并逐条校验 CRC。
+
+验证：9 个单元测试（分组与 namespace 展平、排序稳定性、独立读取器解析、跨运行确定性、非 ASCII
+路径与内容、manifest 内容与摘要、存储的读写与隔离）+ 6 个集成测试（真库 + 真 API：建发布、未打包时
+404、打包、下载得到真实 zip 且信封未污染、重新打包字节相同、跨项目 id 取不到）。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -432,10 +457,10 @@ Webhook 作业把 `organizationId` 放进载荷——读那一行本来就需要
 | Remote MCP 的 OAuth 2.1                             | 部分       | 仅 Bearer Token；无 OAuth 授权码流程                                                                                                                                                                                                                                                                                                                                                    |
 | Remote MCP 的 Resources 模板                        | 部分       | 已注册 `qa-rules`、`localehub://skills` 与 `localehub://skills/{slug}`。项目级资源模板（`localehub://projects/{projectId}` 及其子资源）**未实现**，已从 `/mcp/tools` 的声明中移除——声明一条没有 Server 实现的 resource 会让客户端去读一个必然失败的地址（见 §1.13）                                                                                                                     |
 | Skills 脚本隔离执行器                               | **未实现** | `kind=SCRIPT` 仅登记，任何进程都不执行（见 SKILLS.md）                                                                                                                                                                                                                                                                                                                                  |
-| 对象存储 / 预签名 URL                               | **未实现** | 导入导出走 JSON 响应体；未接 S3/MinIO                                                                                                                                                                                                                                                                                                                                                   |
+| 对象存储 / 预签名 URL                               | 部分       | 发布包走目录存储并按组织/发布 id 寻址，下载是独立请求；导入导出仍走 JSON 响应体，未接 S3/MinIO。换 S3 只需替换 `packages/domain/src/bundles.ts` 的存储层                                                                                                                                                                                                                                |
 | CSV / XLSX 适配器                                   | **已完成** | 22 个单元测试 + 6 个集成测试（经真实导出端点往返），见 §1.19                                                                                                                                                                                                                                                                                                                            |
 | Git/GitHub App、PR 检查                             | **未实现** | 规格 §14 第二阶段                                                                                                                                                                                                                                                                                                                                                                       |
-| 发布快照导出为实际文件包                            | 部分       | 快照入库与校验和字段存在，未打包导出                                                                                                                                                                                                                                                                                                                                                    |
+| 发布快照导出为实际文件包                            | **已完成** | 确定性 zip（含 manifest 与逐文件摘要），见 §1.23                                                                                                                                                                                                                                                                                                                                        |
 | Webhook 事件推送                                    | **已完成** | HMAC 签名投递 + 重试 + 投递日志，见 §1.20；游标拉取仍然保留                                                                                                                                                                                                                                                                                                                             |
 | 多组织切换 UI                                       | 部分       | API 支持 `switch-organization`，UI 只展示列表                                                                                                                                                                                                                                                                                                                                           |
 | 用户管理（建号 / 角色 / 项目角色）                  | **已完成** | 无邀请、无自助注册：管理员在 `/settings/members` 直接建号（邮箱+姓名+初始密码+角色）、改组织角色、分配项目角色与语言范围、重置密码、移出组织。API 与守卫见 §1.14                                                                                                                                                                                                                        |
@@ -474,8 +499,8 @@ Webhook 作业把 `organizationId` 放进载荷——读那一行本来就需要
 pnpm -r build                     # 全部 packages + apps 编译通过
 pnpm --filter @localehub/web exec next build   # 15 条路由构建成功
 pnpm -r typecheck                              # 16 个 workspace 项目全部通过
-pnpm test                                      # 172 unit tests passed（含 OpenAPI 一致性 7、CSV/XLSX 22、Webhook 14）
-pnpm test:integration                          # 86 integration tests passed（14 验收 + 12 安全 + 11 Skill + 22 成员 + 15 账号审计 + 6 导入导出 + 6 Webhook）
+pnpm test                                      # 181 unit tests passed（OpenAPI 一致性 7、CSV/XLSX 22、Webhook 14、发布包 9）
+pnpm test:integration                          # 92 integration tests passed（14 验收 + 12 安全 + 11 Skill + 22 成员 + 15 账号审计 + 6 导入导出 + 6 Webhook + 6 发布包）
 node apps/e2e-demo/dist/run-demo.js            # ALL ACCEPTANCE CHECKS PASSED（A–E）
 docker compose config                          # valid
 docker compose -f compose.yaml -f compose.production.yaml config   # valid
