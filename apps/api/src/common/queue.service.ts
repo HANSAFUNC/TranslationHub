@@ -6,6 +6,7 @@ export const QUEUE_NAMES = {
   QA: 'qa',
   IMPORT_EXPORT: 'import-export',
   NOTIFICATIONS: 'notifications',
+  WEBHOOKS: 'webhooks',
   AI: 'ai',
 } as const;
 
@@ -47,8 +48,11 @@ export class QueueService implements OnModuleDestroy {
         ...options,
       });
       return { jobId: job.id ?? null, queued: true };
-    } catch {
-      // Queue unavailability must not fail the request; the caller can retry synchronously.
+    } catch (error) {
+      // Queue unavailability must not fail the request; the caller can retry synchronously. It is
+      // logged rather than discarded — a silently dropped job is indistinguishable from a worker
+      // that simply has not run yet, which is what made a webhook delivery look stuck.
+      console.error(`[queue:${name}] could not enqueue ${jobName}:`, error instanceof Error ? error.message : error);
       return { jobId: null, queued: false };
     }
   }

@@ -231,12 +231,24 @@ export class PlatformController {
     @Body(zodBody(z.object({ locale: localeTagSchema.optional() }))) body: { locale?: string },
   ) {
     assertRole(actor, projectId, Role.TRANSLATOR);
-    return this.queue.enqueue(
+    const result = await this.queue.enqueue(
       QUEUE_NAMES.QA,
       'qa.run',
       { organizationId: actor.organizationId, projectId, locale: body.locale, requestedBy: actor.userId },
-      { jobId: `qa:${projectId}:${body.locale ?? 'all'}:${Date.now()}` },
+      // A job id becomes part of a Redis key, so it cannot contain ':'. Dots and dashes read
+      // just as well and BullMQ accepts them.
+      { jobId: `qa-${projectId}-${body.locale ?? 'all'}-${Date.now()}` },
     );
+    // `enqueue` reports failure instead of throwing so a request can still succeed, but an
+    // accepted-looking response for a job that was never queued is how this went unnoticed.
+    if (!result.queued) {
+      throw new LocaleHubError(
+        ErrorCode.INTERNAL_ERROR,
+        'Could not queue the QA run; the queue is unavailable. Retry, or run QA synchronously.',
+        503,
+      );
+    }
+    return result;
   }
 
   /**

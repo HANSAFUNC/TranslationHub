@@ -240,6 +240,7 @@ export class SyncService {
             locale: baseline.localeCode,
             localHash: baseline.localHash,
             remoteHash: baseline.remoteHash,
+            localFileId: baseline.localFileId,
             baseValue: baseline.baseValue,
             remoteVersionId: baseline.translationVersionId,
             sourceVersionId: baseline.sourceVersionId,

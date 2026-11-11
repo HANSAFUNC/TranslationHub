@@ -17,6 +17,7 @@ import { AuditService } from '../../common/audit.service';
 import { zodBody } from '../../common/zod.pipe';
 import { SyncService } from '@localehub/domain';
 import { OrganizationsService } from '../organizations/organizations.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 const changesQuerySchema = z.object({
   locale: z.union([z.string(), z.array(z.string())]).optional(),
@@ -45,6 +46,8 @@ export class SyncController {
     private readonly sync: SyncService,
     private readonly audit: AuditService,
     private readonly organizations: OrganizationsService,
+  
+    private readonly webhooks: WebhooksService,
   ) {}
 
   /** Statuses that only an opted-in organization may pull into a repository. */
@@ -208,6 +211,18 @@ export class SyncController {
       metadata: { summary: result.summary, idempotentReplay: result.idempotentReplay, planHash: body.planHash },
       durationMs: Date.now() - startedAt,
     });
+    // Published after the audit row, never instead of it: the audit log is the system of record,
+    // webhooks are a notification. An idempotent replay of the same plan is not a new event.
+    if (!result.idempotentReplay) {
+      await this.webhooks.publish({
+        organizationId: actor.organizationId,
+        type: 'SYNC_PUSHED',
+        // The push body names only the plan and `PushResult` does not repeat the project id, so it
+        // comes from the plan itself — not a cast on the result, which would be a guess.
+        projectId: (await this.sync.getPlanSummary(body.syncPlanId, actor)).projectId,
+        data: { syncSessionId: result.syncSessionId, summary: result.summary, planHash: body.planHash },
+      });
+    }
     return result;
   }
 

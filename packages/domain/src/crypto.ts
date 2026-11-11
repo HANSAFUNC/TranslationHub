@@ -17,6 +17,8 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 
 export const MCP_TOKEN_PREFIX = 'lh_mcp_';
 export const API_TOKEN_PREFIX = 'lh_api_';
+/** Webhook signing secrets. Recognisable as a credential, never valid as one for the API. */
+export const WEBHOOK_SECRET_PREFIX = 'whsec_';
 
 export interface GeneratedToken {
   token: string;
@@ -31,8 +33,8 @@ export interface GeneratedToken {
  * creation time. Tokens must never appear in YAML config, git, logs or stack traces
  * (spec §4.2), so the prefix is kept short and the value is only ever returned once.
  */
-export function generateToken(kind: 'mcp' | 'api' = 'mcp'): GeneratedToken {
-  const prefix = kind === 'mcp' ? MCP_TOKEN_PREFIX : API_TOKEN_PREFIX;
+export function generateToken(kind: 'mcp' | 'api' | 'webhook' = 'mcp'): GeneratedToken {
+  const prefix = kind === 'mcp' ? MCP_TOKEN_PREFIX : kind === 'api' ? API_TOKEN_PREFIX : WEBHOOK_SECRET_PREFIX;
   const secret = randomBytes(32).toString('base64url');
   const token = `${prefix}${secret}`;
   return { token, tokenHash: hashToken(token), tokenPrefix: token.slice(0, 12) };

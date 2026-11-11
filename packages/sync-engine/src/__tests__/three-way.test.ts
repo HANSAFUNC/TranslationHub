@@ -41,11 +41,18 @@ function remote(
   };
 }
 
-function baseline(key: string, value: string | null, options: { locale?: string; sourceVersionId?: string | null } = {}): SyncBaselineSnapshot {
+function baseline(
+  key: string,
+  value: string | null,
+  options: { locale?: string; sourceVersionId?: string | null; localFileId?: string | null } = {},
+): SyncBaselineSnapshot {
   return {
     ...identity(key, options.locale ?? 'ja-JP'),
     localHash: value === null ? null : contentHash(value),
     remoteHash: value === null ? null : contentHash(value),
+    // Matches the `local()` helper's fileId unless a test says otherwise, so an unrelated test is
+    // not accidentally describing a mapping change.
+    localFileId: options.localFileId === undefined ? 'web-ja' : options.localFileId,
     baseValue: value,
     remoteVersionId: value === null ? null : `tv_${key}`,
     sourceVersionId: options.sourceVersionId ?? 'sv_1',
@@ -66,6 +73,62 @@ function entry(params: {
     baseline: params.baseline ?? null,
   };
 }
+
+describe('file mapping changes', () => {
+  // `FILE_MAPPING_CHANGED` was declared as a conflict reason but never produced by anything. It is
+  // the reason a reviewer needs when a mapping edit moved a key to a different file: the values
+  // did both change, but "both changed" hides the part that matters, which is that writing the
+  // remote value back would land somewhere the translation never lived.
+  it('reports a mapping change instead of a generic both-changed conflict', () => {
+    const diff = computeSyncDiff(
+      entry({
+        local: { ...local('checkout.pay_now', 'local edit'), fileId: 'web-ja-v2' },
+        remote: remote('checkout.pay_now', 'remote edit'),
+        baseline: baseline('checkout.pay_now', 'base', { localFileId: 'web-ja' }),
+      }),
+    );
+    expect(diff.action).toBe('CONFLICT');
+    expect(diff.conflictReason).toBe('FILE_MAPPING_CHANGED');
+    expect(diff.reason).toBe('LOCAL_FILE_MAPPING_CHANGED');
+  });
+
+  it('leaves an ordinary both-changed conflict alone', () => {
+    const diff = computeSyncDiff(
+      entry({
+        local: local('checkout.pay_now', 'local edit'),
+        remote: remote('checkout.pay_now', 'remote edit'),
+        baseline: baseline('checkout.pay_now', 'base'),
+      }),
+    );
+    expect(diff.conflictReason).toBe('LOCAL_AND_REMOTE_CHANGED');
+  });
+
+  it('does not invent a mapping change when the baseline predates the column', () => {
+    // A baseline with no recorded file id cannot say the file moved. Treating "unknown" as
+    // "changed" would relabel every conflict in every project that has not been pushed since.
+    const diff = computeSyncDiff(
+      entry({
+        local: { ...local('checkout.pay_now', 'local edit'), fileId: 'web-ja-v2' },
+        remote: remote('checkout.pay_now', 'remote edit'),
+        baseline: baseline('checkout.pay_now', 'base', { localFileId: null }),
+      }),
+    );
+    expect(diff.conflictReason).toBe('LOCAL_AND_REMOTE_CHANGED');
+  });
+
+  it('does not treat a move with an unchanged value as a conflict at all', () => {
+    const diff = computeSyncDiff(
+      entry({
+        local: { ...local('checkout.pay_now', 'same'), fileId: 'web-ja-v2' },
+        remote: remote('checkout.pay_now', 'remote edit'),
+        baseline: baseline('checkout.pay_now', 'same', { localFileId: 'web-ja' }),
+      }),
+    );
+    // The local hash matches the baseline, so only the remote side changed.
+    expect(diff.action).toBe('PULL_REMOTE');
+    expect(diff.conflictReason).toBeUndefined();
+  });
+});
 
 describe('three-way comparison (spec §7.2)', () => {
   it('skips when neither side changed', () => {

@@ -65,6 +65,14 @@ export interface RemoteEntrySnapshot extends SyncIdentity {
 export interface SyncBaselineSnapshot extends SyncIdentity {
   localHash: string | null;
   remoteHash: string | null;
+  /**
+   * Which file the entry lived in when the baseline was recorded.
+   *
+   * Carried so the comparison can tell "the translation changed" from "the translation moved":
+   * a mapping edit (`files[].paths` in `.localehub/config.yaml`) puts the same key in a different
+   * file, and a write-back that silently targets the new file is not the change anybody asked for.
+   */
+  localFileId?: string | null;
   baseValue?: string | null;
   remoteVersionId?: string | null;
   sourceVersionId?: string | null;

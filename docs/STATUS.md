@@ -366,6 +366,63 @@ OpenAPI 工具都会找不到 `openapi` 字段。新增 `@RawResponse()` 让「�
 XLSX 数字与富文本、拒绝原地补丁、zip 签名识别）+ 6 个集成测试（真库 + 真 API：导出 JSON/CSV/XLSX，
 XLSX 解出来是 zip 签名并能被适配器读回同样的译文，未知格式 422）。
 
+### 1.20 Webhook 事件推送（本轮新增）
+
+`SYNC_PUSHED`、`TRANSLATION_APPROVED` / `TRANSLATION_REJECTED` 会推送到组织配置的 HTTP 端点。
+
+| 能力     | 位置                                                                      |
+| -------- | ------------------------------------------------------------------------- |
+| 端点管理 | `GET/POST/PATCH/DELETE /organization/webhooks`                            |
+| 投递历史 | `GET /organization/webhooks/:id/deliveries`                               |
+| 签名     | `x-localehub-signature: t=<unix>,v1=<hex>`，HMAC-SHA256 over `<t>.<body>` |
+| 事件标识 | `x-localehub-event`、`x-localehub-event-id`                               |
+
+几个刻意的决定：
+
+- **事件先落库再入队**。`webhook_deliveries` 是耐久记录，队列只是通知 worker；重启、重部署或 Redis
+  清空都不会丢掉一个已经接受的事件，运维也永远能回答「这条到底送达没有」。
+- **签名密钥加密存储，不是哈希**。这是唯一无法套用「只存哈希」规则的地方：校验 Token 只需要哈希，
+  而**生成**签名需要密钥本身。用 `ENCRYPTION_KEY` 派生的 AES-256-GCM，数据库被拖走也伪造不了签名。
+- **时间戳在被签名的字符串里**，不只是放在旁边——否则截获一个请求、改一下 `t` 就能重放。
+- **至少一次投递**。worker 在消费者处理完但行未更新时崩溃会导致重复投递；`x-localehub-event-id` 是
+  给消费者去重用的，文档里写明了。
+- **重试约 9 小时**（10s → 30s → 2m → 10m → 30m → 2h → 6h），之后标记 `FAILED` 并留在投递日志里。
+  维护窗口内下线的消费者仍能收到，彻底消失的消费者不会被反复打扰。
+- 无 `eventTypes` 的端点接收全部事件——这是运维加一个 webhook 时的本意，而「静默收不到任何东西」
+  是更糟的默认。
+
+### 1.21 映射变更检测（本轮新增）
+
+`FILE_MAPPING_CHANGED` 此前只是声明了一个冲突原因，从未被任何代码产生。现在当 baseline 记录的
+`localFileId` 与本次扫描的文件不一致、且两侧都发生变化时，冲突原因是它而不是笼统的
+`LOCAL_AND_REMOTE_CHANGED`——因为审核人真正要决定的是：把远端值写回去，会落到一个这条译文从未住过的文件里。
+
+baseline 没有记录文件 id（该列之前就存在但没传给 diff）时**不**报告映射变化：把「未知」当成「变了」
+会让每个尚未推送过的项目里的每条冲突都被错误重标。
+
+验证：4 个单元测试（映射变化、普通双侧冲突不受影响、baseline 无记录时不误报、纯移动不算冲突）。
+
+### 1.22 三个真实缺陷：后台任务从未工作（本轮发现并修复）
+
+做 Webhook 时，端到端验证暴露了三个各自独立、又互相掩盖的缺陷。**异步 QA 从未成功入队过**：
+
+1. **`jobId` 含冒号**。`qa/run-async` 传 `jobId: \`qa:${projectId}:...\``，BullMQ 的 job id 会成为
+Redis key 的一部分，直接拒绝（`Custom Id cannot contain :`）。
+2. **入队失败被静默吞掉**。`QueueService.enqueue` 为了不让请求失败而 catch 掉异常并返回
+   `queued: false`，但**没有任何调用方检查这个返回值**——端点照常返回 201，客户端以为任务已受理。
+   同步 QA 一直可用，所以这个洞一直没被注意到。
+3. **worker 没有 RLS 上下文**。worker 用的是裸 `PrismaClient`，不设置 `app.current_org_id`；而所有
+   租户表都有行级策略，于是**未限定租户的读取返回 0 行**。QA 任务因此读到「项目不存在」，
+   Webhook 任务读到「投递行不存在」——两者都表现为「任务跑完了但什么都没发生」。
+
+修法：job id 改用连字符；`enqueue` 失败打日志，`qa/run-async` 在 `queued === false` 时返回 503
+而不是假装成功；worker 的作业体走 `TenantPrisma.withOrganization`（与 API 同一条受认可路径），
+Webhook 作业把 `organizationId` 放进载荷——读那一行本来就需要它。
+
+验证：`scripts/check-webhook-worker.mjs` 起一个真实 HTTP 接收端，经 API 触发事件，等 **worker 进程**
+投递，再用消费者的方式验签——通过（`delivered SYNC_PUSHED | signature verified: true`）。
+异步 QA 实测 `queued: true` 且 `qa_runs` 达到 `SUCCEEDED`。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -379,14 +436,14 @@ XLSX 解出来是 zip 签名并能被适配器读回同样的译文，未知格�
 | CSV / XLSX 适配器                                   | **已完成** | 22 个单元测试 + 6 个集成测试（经真实导出端点往返），见 §1.19                                                                                                                                                                                                                                                                                                                            |
 | Git/GitHub App、PR 检查                             | **未实现** | 规格 §14 第二阶段                                                                                                                                                                                                                                                                                                                                                                       |
 | 发布快照导出为实际文件包                            | 部分       | 快照入库与校验和字段存在，未打包导出                                                                                                                                                                                                                                                                                                                                                    |
-| Webhook 事件推送                                    | **未实现** | 目前依赖 `since_revision` 游标拉取                                                                                                                                                                                                                                                                                                                                                      |
+| Webhook 事件推送                                    | **已完成** | HMAC 签名投递 + 重试 + 投递日志，见 §1.20；游标拉取仍然保留                                                                                                                                                                                                                                                                                                                             |
 | 多组织切换 UI                                       | 部分       | API 支持 `switch-organization`，UI 只展示列表                                                                                                                                                                                                                                                                                                                                           |
 | 用户管理（建号 / 角色 / 项目角色）                  | **已完成** | 无邀请、无自助注册：管理员在 `/settings/members` 直接建号（邮箱+姓名+初始密码+角色）、改组织角色、分配项目角色与语言范围、重置密码、移出组织。API 与守卫见 §1.14                                                                                                                                                                                                                        |
 | 会话列表 / 远程登出                                 | **未实现** | 没有 `UserSession` 表，改密码不会注销其他设备，也无法查看「我在哪些设备登录过」。要立即切断访问只能靠暂停账号（见 §1.18）                                                                                                                                                                                                                                                               |
 | 前端单元测试                                        | **未实现** | 仓库里没有 Playwright / RTL 用例，也没有进 CI 的浏览器测试。人工验证用无头 Chrome（CDP）脚本，判定标准是「页面出现真实数据且无错误提示」，不是 HTTP 200——后者在 API 全挂时依然成立，本文件 §1.10 就是这么被骗过一次的                                                                                                                                                                   |
 | Docker 镜像与整套 compose 栈                        | **已完成** | `docker compose up -d --build` 起全套（postgres / redis / api / worker / mcp-remote / web）。无头 Chrome 实测 24/24：登录后首页、9 条路由与两张项目详情页都渲染出真实数据（不是只 HTTP 200），`/mcp`「客户端配置」三个片段可渲染可复制，桌面与 390px 均无横向溢出；Remote MCP 用 SDK 客户端握手 15 个工具，本地文件类工具未暴露。**过程中发现并修掉两个只在容器里出现的缺陷，见 §1.10** |
 | i18n Adapter：JSON 数组/ICU AST                     | 部分       | ICU 复数以字符串形式保存，非 AST 级编辑                                                                                                                                                                                                                                                                                                                                                 |
-| `file_hash` 级别的映射变更检测                      | 部分       | 已存 `local_file_id/path`，`FILE_MAPPING_CHANGED` 冲突原因已定义但未产生                                                                                                                                                                                                                                                                                                                |
+| `file_hash` 级别的映射变更检测                      | **已完成** | 映射变化现在产生 `FILE_MAPPING_CHANGED` 冲突，见 §1.21                                                                                                                                                                                                                                                                                                                                  |
 | `organizations` / `users` / `review_actions` 的 RLS | **未覆盖** | 这三张表没有 `organization_id` 列（`review_actions` 通过 `review_tasks` 关联），未启用行级策略。应用角色可读取全部用户行（含密码哈希）——前提是先通过鉴权；认证路径本就走特权通道。补法见 §5 第 1 项                                                                                                                                                                                     |
 
 ## 3. 已知风险与设计取舍
@@ -417,8 +474,8 @@ XLSX 解出来是 zip 签名并能被适配器读回同样的译文，未知格�
 pnpm -r build                     # 全部 packages + apps 编译通过
 pnpm --filter @localehub/web exec next build   # 15 条路由构建成功
 pnpm -r typecheck                              # 16 个 workspace 项目全部通过
-pnpm test                                      # 154 unit tests passed（含 7 个 OpenAPI 一致性、22 个 CSV/XLSX）
-pnpm test:integration                          # 80 integration tests passed（14 验收 + 12 安全 + 11 Skill 下发 + 22 成员管理 + 15 账号与审计 + 6 导入导出）
+pnpm test                                      # 172 unit tests passed（含 OpenAPI 一致性 7、CSV/XLSX 22、Webhook 14）
+pnpm test:integration                          # 86 integration tests passed（14 验收 + 12 安全 + 11 Skill + 22 成员 + 15 账号审计 + 6 导入导出 + 6 Webhook）
 node apps/e2e-demo/dist/run-demo.js            # ALL ACCEPTANCE CHECKS PASSED（A–E）
 docker compose config                          # valid
 docker compose -f compose.yaml -f compose.production.yaml config   # valid

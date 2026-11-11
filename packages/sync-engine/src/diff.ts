@@ -42,6 +42,20 @@ function baseState(entry: ComparableEntry): SideState {
   };
 }
 
+/**
+ * Did this entry move to a different file since the baseline was recorded?
+ *
+ * Only meaningful when both sides are known: a baseline without a `localFileId` predates the
+ * column, and treating "unknown" as "changed" would report a mapping change for every entry of
+ * every project that has not been pushed since.
+ */
+function localFileChanged(entry: ComparableEntry): boolean {
+  const current = entry.local?.fileId;
+  const recorded = entry.baseline?.localFileId;
+  if (!current || !recorded) return false;
+  return current !== recorded;
+}
+
 function side(state: SideState, base: SideState): DiffSide {
   return {
     value: state.value,
@@ -139,6 +153,13 @@ export function computeSyncDiff(entry: ComparableEntry, options: DiffOptions = {
   // both changed, different values
   if (remoteStale && !options.allowStaleTranslations) {
     return build('CONFLICT', 'BOTH_CHANGED_AND_REMOTE_SOURCE_STALE', 'SOURCE_VERSION_CHANGED');
+  }
+  // A mapping edit moved the key to a different file since the baseline. Both sides did change,
+  // but saying only that hides the part a reviewer has to decide about: writing the remote value
+  // back would now land in a file the translation never lived in. Reported as its own reason so
+  // the conflict list says which file moved, rather than a generic "both changed".
+  if (localFileChanged(entry)) {
+    return build('CONFLICT', 'LOCAL_FILE_MAPPING_CHANGED', 'FILE_MAPPING_CHANGED');
   }
   return build('CONFLICT', 'LOCAL_AND_REMOTE_CHANGED', 'LOCAL_AND_REMOTE_CHANGED');
 }

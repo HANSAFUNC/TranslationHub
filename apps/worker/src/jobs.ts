@@ -1,8 +1,9 @@
 import { Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { PrismaClient } from '@localehub/database';
+import { PrismaClient, TenantPrisma } from '@localehub/database';
 import { runQaRules, type QaCandidateEntry } from '@localehub/domain';
 import { QUEUE_NAMES } from './queues';
+import { startWebhookWorker } from './webhooks';
 
 /**
  * BullMQ worker.
@@ -18,6 +19,10 @@ export interface QaJobPayload {
 }
 
 export function startWorker(connection: IORedis, prisma: PrismaClient): Worker[] {
+  // Every job reads tenant data behind row level security. A bare `PrismaClient` sets no
+  // organization context, so an unscoped read returns zero rows — a job that silently does
+  // nothing. `TenantPrisma.withOrganization` is the same sanctioned path the API uses.
+  const tenant = new TenantPrisma(prisma);
   const workers: Worker[] = [];
 
   workers.push(
@@ -25,10 +30,13 @@ export function startWorker(connection: IORedis, prisma: PrismaClient): Worker[]
       QUEUE_NAMES.QA,
       async (job: Job<QaJobPayload>) => {
         const { organizationId, projectId, locale, requestedBy } = job.data;
-        const project = await prisma.project.findFirst({ where: { id: projectId, organizationId }, select: { sourceLocale: true } });
+        // Scoped: `projects`, `translation_entries` and `glossary_terms` all carry a row level
+        // security policy, and an unscoped read returns nothing rather than everything.
+        return tenant.withOrganization(organizationId, async (tx) => {
+        const project = await tx.project.findFirst({ where: { id: projectId }, select: { sourceLocale: true } });
         if (!project) throw new Error(`project ${projectId} not found in organization ${organizationId}`);
 
-        const run = await prisma.qaRun.create({
+        const run = await tx.qaRun.create({
           data: {
             organizationId,
             projectId,
@@ -39,11 +47,11 @@ export function startWorker(connection: IORedis, prisma: PrismaClient): Worker[]
           },
         });
 
-        const entries = await prisma.translationEntry.findMany({
+        const entries = await tx.translationEntry.findMany({
           where: { projectId, ...(locale ? { localeCode: locale } : {}) },
           include: { key: { include: { namespace: true, sourceVersions: { orderBy: { version: 'desc' }, take: 1 } } } },
         });
-        const glossary = await prisma.glossaryTerm.findMany({ where: { organizationId, OR: [{ projectId }, { projectId: null }] } });
+        const glossary = await tx.glossaryTerm.findMany({ where: { organizationId, OR: [{ projectId }, { projectId: null }] } });
 
         const candidates: QaCandidateEntry[] = entries.map((entry) => ({
           entryId: entry.id,
@@ -65,10 +73,10 @@ export function startWorker(connection: IORedis, prisma: PrismaClient): Worker[]
         const findings = runQaRules(candidates);
         const entryIds = entries.map((entry) => entry.id);
         if (entryIds.length) {
-          await prisma.qaIssue.deleteMany({ where: { projectId, entryId: { in: entryIds }, status: 'OPEN' } });
+          await tx.qaIssue.deleteMany({ where: { projectId, entryId: { in: entryIds }, status: 'OPEN' } });
         }
         if (findings.length) {
-          await prisma.qaIssue.createMany({
+          await tx.qaIssue.createMany({
             data: findings.map((finding) => ({
               organizationId,
               projectId,
@@ -83,11 +91,12 @@ export function startWorker(connection: IORedis, prisma: PrismaClient): Worker[]
             })),
           });
         }
-        await prisma.qaRun.update({
+        await tx.qaRun.update({
           where: { id: run.id },
           data: { status: 'SUCCEEDED', finishedAt: new Date(), issueCount: findings.length },
         });
         return { issues: findings.length, entries: entries.length };
+        });
       },
       { connection, concurrency: 2 },
     ),
@@ -120,6 +129,8 @@ export function startWorker(connection: IORedis, prisma: PrismaClient): Worker[]
       { connection, concurrency: 1 },
     ),
   );
+
+  workers.push(startWebhookWorker(connection, prisma, tenant));
 
   for (const worker of workers) {
     worker.on('failed', (job, error) => {

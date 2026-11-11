@@ -15,6 +15,7 @@ import { SyncController } from '../modules/sync/sync.controller';
 import { TokensController } from '../modules/tokens/tokens.controller';
 import { TranslationsController } from '../modules/translations/translations.controller';
 import { UsersController } from '../modules/users/users.controller';
+import { WebhooksController } from '../modules/webhooks/webhooks.controller';
 
 /**
  * OpenAPI 3.1 document, generated from the code that enforces the API.
@@ -69,6 +70,7 @@ const CONTROLLERS = [
   PlatformController,
   TokensController,
   McpController,
+  WebhooksController,
 ];
 
 const TAGS: Record<string, string> = {
@@ -84,6 +86,7 @@ const TAGS: Record<string, string> = {
   PlatformController: 'Skill、发布、导入导出',
   TokensController: 'MCP Token',
   McpController: 'MCP 发现',
+  WebhooksController: 'Webhook',
 };
 
 /** Nest's `RouteParamtypes`, inlined: importing the enum drags in the whole request pipeline. */

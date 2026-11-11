@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { Actor, RequireRole, RequireScopes, type ActorContext } from '../../common/auth';
 import { zodBody } from '../../common/zod.pipe';
 import { TranslationsService } from './translations.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 const listSchema = z.object({
   locale: localeTagSchema.optional(),
@@ -36,7 +37,9 @@ const submitSchema = z.object({
 
 @Controller('projects/:projectId')
 export class TranslationsController {
-  constructor(private readonly translations: TranslationsService) {}
+  constructor(private readonly translations: TranslationsService,
+    private readonly webhooks: WebhooksService,
+  ) {}
 
   @Get('translations')
   async list(
@@ -92,7 +95,19 @@ export class TranslationsController {
     @Param('projectId') projectId: string,
     @Body(zodBody(reviewSchema)) body: z.infer<typeof reviewSchema>,
   ) {
-    return this.translations.review(actor, projectId, body.entryIds, { decision: body.decision, comment: body.comment });
+    const result = await this.translations.review(actor, projectId, body.entryIds, {
+      decision: body.decision,
+      comment: body.comment,
+    });
+    // One event per decision, not per entry: a reviewer approving forty rows made one decision,
+    // and forty deliveries would be a poor way to say so.
+    await this.webhooks.publish({
+      organizationId: actor.organizationId,
+      type: body.decision === 'APPROVE' ? 'TRANSLATION_APPROVED' : 'TRANSLATION_REJECTED',
+      projectId,
+      data: { entryIds: body.entryIds, decision: body.decision, comment: body.comment ?? null },
+    });
+    return result;
   }
 
   @Get('reviews/queue')

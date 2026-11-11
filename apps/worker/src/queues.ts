@@ -2,6 +2,7 @@ export const QUEUE_NAMES = {
   QA: 'qa',
   IMPORT_EXPORT: 'import-export',
   NOTIFICATIONS: 'notifications',
+  WEBHOOKS: 'webhooks',
   AI: 'ai',
 } as const;
 

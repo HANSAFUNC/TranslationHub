@@ -27,6 +27,8 @@ import { OrganizationsController } from './modules/organizations/organizations.c
 import { OrganizationsService } from './modules/organizations/organizations.service';
 import { UsersController } from './modules/users/users.controller';
 import { OpenApiController } from './openapi/openapi.controller';
+import { WebhooksController } from './modules/webhooks/webhooks.controller';
+import { WebhooksService } from './modules/webhooks/webhooks.service';
 import { UsersService } from './modules/users/users.service';
 
 @Module({
@@ -44,6 +46,7 @@ import { UsersService } from './modules/users/users.service';
     OrganizationsController,
     UsersController,
     OpenApiController,
+    WebhooksController,
   ],
   providers: [
     PrismaService,
@@ -54,6 +57,7 @@ import { UsersService } from './modules/users/users.service';
     QaService,
     OrganizationsService,
     UsersService,
+    WebhooksService,
     {
       provide: SyncService,
       useFactory: (prisma: PrismaService) => new SyncService(prisma, prisma.tenant),

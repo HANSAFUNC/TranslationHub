@@ -240,6 +240,7 @@ model Organization {
   skills                 Skill[]
   auditLogs              AuditLog[]
   translationMemory      TranslationMemoryEntry[]
+  webhooks               Webhook[]
 
   @@map("organizations")
 }
@@ -797,6 +798,62 @@ model ProjectEvent {
   @@index([projectId, revision])
   @@index([organizationId])
   @@map("project_events")
+}
+
+/// An organization's webhook endpoint.
+///
+/// The delivery record is a table rather than a queue entry: a queue is a delivery *attempt*, and
+/// what an operator needs to answer is "did this event reach them, and if not, what did they say"
+/// — which has to outlive the job. Retries read from here, so a worker restart does not lose an
+/// event that was accepted but never delivered.
+model Webhook {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  url            String
+  /// Event types to send. Empty means every type, which is what an operator almost always wants.
+  eventTypes     String[]  @default([]) @map("event_types")
+  /// The signing secret, encrypted with ENCRYPTION_KEY rather than hashed.
+  ///
+  /// This is the one place the "store only a hash" rule cannot apply: verifying a token needs the
+  /// hash, but *producing* an HMAC signature needs the key itself. Encryption keeps it out of
+  /// reach of a database dump while still allowing the worker to sign.
+  secretEncrypted String   @map("secret_encrypted")
+  secretPrefix   String    @map("secret_prefix")
+  active         Boolean   @default(true)
+  description    String?
+  createdById    String?   @map("created_by_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries   WebhookDelivery[]
+
+  @@index([organizationId, active])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  webhookId      String    @map("webhook_id") @db.Uuid
+  /// Unique per event and endpoint, so a retry cannot deliver the same event twice.
+  eventId        String    @map("event_id")
+  eventType      String    @map("event_type")
+  payload        Json      @default("{}")
+  status         String    @default("PENDING")
+  attempts       Int       @default(0)
+  lastStatusCode Int?      @map("last_status_code")
+  lastError      String?   @map("last_error")
+  nextAttemptAt  DateTime? @map("next_attempt_at")
+  deliveredAt    DateTime? @map("delivered_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@unique([webhookId, eventId])
+  @@index([status, nextAttemptAt])
+  @@map("webhook_deliveries")
 }
 
 /* ------------------------------------------------------------ mcp / auth */

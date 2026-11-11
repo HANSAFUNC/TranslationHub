@@ -58,6 +58,10 @@
     {
       "name": "MCP 发现",
       "description": "MCP 发现"
+    },
+    {
+      "name": "Webhook",
+      "description": "Webhook"
     }
   ],
   "paths": {
@@ -1684,6 +1688,360 @@
             }
           }
         }
+      }
+    },
+    "/organization/webhooks": {
+      "get": {
+        "operationId": "Webhooks_list",
+        "tags": [
+          "Webhook"
+        ],
+        "summary": "GET /organization/webhooks",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "ORG_ADMIN",
+          "scopes": [],
+          "enforcedBy": "service",
+          "note": "service 内校验：webhook 会把译文内容发到调用方指定的地址"
+        }
+      },
+      "post": {
+        "operationId": "Webhooks_create",
+        "tags": [
+          "Webhook"
+        ],
+        "summary": "POST /organization/webhooks",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "ORG_ADMIN",
+          "scopes": [],
+          "enforcedBy": "service",
+          "note": "签名密钥只在创建时返回一次"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "maxLength": 2048
+                  },
+                  "eventTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "KEY_CREATED",
+                        "KEY_ARCHIVED",
+                        "SOURCE_VERSION_CREATED",
+                        "TRANSLATION_CREATED",
+                        "TRANSLATION_UPDATED",
+                        "TRANSLATION_SUBMITTED",
+                        "TRANSLATION_APPROVED",
+                        "TRANSLATION_REJECTED",
+                        "TRANSLATION_STALE",
+                        "SYNC_PUSHED",
+                        "SYNC_APPLIED",
+                        "CONFLICT_RESOLVED",
+                        "RELEASE_PUBLISHED"
+                      ]
+                    },
+                    "maxItems": 13
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organization/webhooks/{id}": {
+      "delete": {
+        "operationId": "Webhooks_remove",
+        "tags": [
+          "Webhook"
+        ],
+        "summary": "DELETE /organization/webhooks/{id}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "ORG_ADMIN",
+          "scopes": [],
+          "enforcedBy": "service"
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "Webhooks_update",
+        "tags": [
+          "Webhook"
+        ],
+        "summary": "PATCH /organization/webhooks/{id}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "ORG_ADMIN",
+          "scopes": [],
+          "enforcedBy": "service"
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "eventTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "KEY_CREATED",
+                        "KEY_ARCHIVED",
+                        "SOURCE_VERSION_CREATED",
+                        "TRANSLATION_CREATED",
+                        "TRANSLATION_UPDATED",
+                        "TRANSLATION_SUBMITTED",
+                        "TRANSLATION_APPROVED",
+                        "TRANSLATION_REJECTED",
+                        "TRANSLATION_STALE",
+                        "SYNC_PUSHED",
+                        "SYNC_APPLIED",
+                        "CONFLICT_RESOLVED",
+                        "RELEASE_PUBLISHED"
+                      ]
+                    },
+                    "maxItems": 13
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                },
+                "additionalProperties": false,
+                "$schema": "http://json-schema.org/draft-07/schema#"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organization/webhooks/{id}/deliveries": {
+      "get": {
+        "operationId": "Webhooks_deliveries",
+        "tags": [
+          "Webhook"
+        ],
+        "summary": "GET /organization/webhooks/{id}/deliveries",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "ORG_ADMIN",
+          "scopes": [],
+          "enforcedBy": "service"
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/projects": {

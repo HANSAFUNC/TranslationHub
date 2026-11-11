@@ -207,6 +207,27 @@ Idempotency-Key: repo-commit-a1b2-plan-xyz
 列名不区分大小写并接受常见别名（`Key`/`键`、`Translation`/`译文`、`Language`、`Comment`/`注释`）。
 **表头是必需的**：按位置解析的话，有人在表格里插一列就会把译文读进 key 列。
 
+### 6.2 Webhook
+
+| Method | Path                                    | 权限      | 说明                                       |
+| ------ | --------------------------------------- | --------- | ------------------------------------------ |
+| GET    | `/organization/webhooks`                | ORG_ADMIN | 端点列表（含各状态投递计数，**不含密钥**） |
+| POST   | `/organization/webhooks`                | ORG_ADMIN | 创建；签名密钥只在此返回一次               |
+| PATCH  | `/organization/webhooks/:id`            | ORG_ADMIN | 启用 / 停用、改事件过滤                    |
+| DELETE | `/organization/webhooks/:id`            | ORG_ADMIN | 删除（投递记录随端点级联删除）             |
+| GET    | `/organization/webhooks/:id/deliveries` | ORG_ADMIN | 投递历史                                   |
+
+投递请求头：
+
+```text
+x-localehub-event: SYNC_PUSHED
+x-localehub-event-id: evt_mwbs5gex_5thok4vk
+x-localehub-signature: t=1794381056,v1=cd59e07d…
+```
+
+验签：`HMAC-SHA256(secret, "<t>.<原始请求体>")` 与 `v1` 比对；时间戳在被签名的字符串内，改 `t`
+即失效。建议拒绝偏差超过 5 分钟的请求，并按 `x-localehub-event-id` 去重——投递是**至少一次**。
+
 ## 7. 术语、记忆、Token、Skill、发布
 
 | Method   | Path                                             | 说明                                |
