@@ -186,6 +186,27 @@ Idempotency-Key: repo-commit-a1b2-plan-xyz
 | POST   | `/projects/:projectId/ai/review`    | AI 审核建议（只读，advisory） |
 | GET    | `/projects/:projectId/ai/providers` | Provider 列表                 |
 
+### 6.1 导入导出格式
+
+`GET /projects/:projectId/export` 的 `format` 接受**同步格式 + `csv` + `xlsx`**：
+
+| format                                                                                             | 用途             | `content` 编码                                                   |
+| -------------------------------------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------- |
+| `json` / `yaml` / `po` / `xliff` / `ios-strings` / `ios-stringsdict` / `xcstrings` / `android-xml` | 仓库同步格式     | `utf8`（默认，内联文本）                                         |
+| `csv`                                                                                              | 产品经理批量编辑 | `utf8`，带 BOM（Excel 否则按系统代码页读，非 ASCII 会乱码）      |
+| `xlsx`                                                                                             | 产品经理批量编辑 | `base64` + `mimeType`（工作簿是 zip 压缩包，不能塞进 JSON 文本） |
+
+两处刻意的不对称：
+
+- **`formatIdSchema`（仓库映射可声明的格式）不含 `xlsx`**。工作簿是 zip，改一个单元格意味着重新生成
+  整个档案，无法原地写回；允许它出现在 `.localehub/config.yaml` 里会造出一个永远 apply 不了的映射。
+  导入导出走 `exportFormatSchema`，比它宽。
+- **`csv` 可以原地补丁**（`applyPatch` 只替换变化的单元格，保留行尾、引号风格与列顺序），
+  但同样只作为导入导出格式暴露，不在仓库映射的默认集合里。
+
+列名不区分大小写并接受常见别名（`Key`/`键`、`Translation`/`译文`、`Language`、`Comment`/`注释`）。
+**表头是必需的**：按位置解析的话，有人在表格里插一列就会把译文读进 key 列。
+
 ## 7. 术语、记忆、Token、Skill、发布
 
 | Method   | Path                                             | 说明                                |

@@ -2644,7 +2644,9 @@
                 "ios-strings",
                 "ios-stringsdict",
                 "xcstrings",
-                "android-xml"
+                "android-xml",
+                "csv",
+                "xlsx"
               ],
               "default": "json"
             }

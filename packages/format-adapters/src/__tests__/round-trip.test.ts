@@ -468,6 +468,8 @@ describe('adapter registry', () => {
   });
 
   it('throws a typed error for an unknown format', () => {
-    expect(() => createAdapter('csv' as never)).toThrow(/No adapter registered/);
+    // `csv` used to stand in here as an unregistered format; it is registered now, so this uses
+    // one that genuinely has no adapter.
+    expect(() => createAdapter('parquet' as never)).toThrow(/No adapter registered/);
   });
 });

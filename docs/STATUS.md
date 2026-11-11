@@ -339,6 +339,33 @@ OpenAPI 工具都会找不到 `openapi` 字段。新增 `@RawResponse()` 让「�
 无头 Chrome 实测四个新/改页面均渲染真实数据、无报错、无横向溢出，并真实点击完成一次「暂停 → 徽章出现 →
 恢复」。
 
+### 1.19 CSV / XLSX 适配器（本轮新增）
+
+规格 §10.1 给这两种格式的用途写得很具体：**「产品经理批量编辑、导入校验」**。它们是给人用的导入
+导出通道，不是仓库同步格式——这条定位决定了下面每个决定。
+
+- **`CsvAdapter`**：RFC 4180，带电子表格实际会产出的东西（引号字段、字段内换行、双写引号、CRLF）。
+  导出写 BOM，因为 Excel 在 Windows 上会把无 BOM 的 UTF-8 CSV 按系统代码页读，非 ASCII 译文全乱；
+  读取时容忍 BOM。`applyPatch` **只替换变化的单元格**，行尾、引号风格与列顺序原样保留——与 JSON
+  适配器打 token 补丁而不是重新序列化同一个理由。
+- **`XlsxAdapter`**：基于 `exceljs`（自己写 xlsx 是典型的重复造轮子）。导出为 base64 + mimeType，
+  读取时把数字、日期、富文本、公式结果都归约成「人会看到的那段文字」。
+  **`applyPatch` 明确拒绝**：工作簿是 zip 压缩的 XML 部件，「改一个单元格」等于重新生成整个档案，
+  没有能保留作者所做修改的原地编辑。所以 `xlsx` **不在** `formatIdSchema`（仓库映射可声明的格式）里
+  ——允许它出现在 `.localehub/config.yaml` 会造出一个永远 apply 不了的映射。导入导出走更宽的
+  `exportFormatSchema`。
+- **列名按名字解析，不按位置**，且**表头必需**：有人在表格里插一列，按位置解析就会把译文读进 key 列。
+  大小写不敏感，接受 `Key`/`键`、`Translation`/`译文`、`Language`、`Comment`/`注释`。
+- **校验一次报全部问题**：缺 key、缺 locale、重复（key+namespace+locale 三元组，因此同一 key 出现在两个
+  namespace 不算重复）、以及值以 `=`/`+`/`@` 开头（电子表格会当公式）——行号按 1 起算并计入表头，与
+  用户看到的表格一致。
+
+`GET /projects/:projectId/export` 现在返回 `encoding` 与 `mimeType`，二进制格式不再需要第二个端点。
+
+验证：22 个单元测试（含列顺序打乱、BOM、CRLF、字段内换行、转义往返、按 namespace 精确匹配、
+XLSX 数字与富文本、拒绝原地补丁、zip 签名识别）+ 6 个集成测试（真库 + 真 API：导出 JSON/CSV/XLSX，
+XLSX 解出来是 zip 签名并能被适配器读回同样的译文，未知格式 422）。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -349,7 +376,7 @@ OpenAPI 工具都会找不到 `openapi` 字段。新增 `@RawResponse()` 让「�
 | Remote MCP 的 Resources 模板                        | 部分       | 已注册 `qa-rules`、`localehub://skills` 与 `localehub://skills/{slug}`。项目级资源模板（`localehub://projects/{projectId}` 及其子资源）**未实现**，已从 `/mcp/tools` 的声明中移除——声明一条没有 Server 实现的 resource 会让客户端去读一个必然失败的地址（见 §1.13）                                                                                                                     |
 | Skills 脚本隔离执行器                               | **未实现** | `kind=SCRIPT` 仅登记，任何进程都不执行（见 SKILLS.md）                                                                                                                                                                                                                                                                                                                                  |
 | 对象存储 / 预签名 URL                               | **未实现** | 导入导出走 JSON 响应体；未接 S3/MinIO                                                                                                                                                                                                                                                                                                                                                   |
-| CSV / XLSX 适配器                                   | **未实现** | 规格 §10.1 列出，本版本未实现                                                                                                                                                                                                                                                                                                                                                           |
+| CSV / XLSX 适配器                                   | **已完成** | 22 个单元测试 + 6 个集成测试（经真实导出端点往返），见 §1.19                                                                                                                                                                                                                                                                                                                            |
 | Git/GitHub App、PR 检查                             | **未实现** | 规格 §14 第二阶段                                                                                                                                                                                                                                                                                                                                                                       |
 | 发布快照导出为实际文件包                            | 部分       | 快照入库与校验和字段存在，未打包导出                                                                                                                                                                                                                                                                                                                                                    |
 | Webhook 事件推送                                    | **未实现** | 目前依赖 `since_revision` 游标拉取                                                                                                                                                                                                                                                                                                                                                      |
@@ -390,8 +417,8 @@ OpenAPI 工具都会找不到 `openapi` 字段。新增 `@RawResponse()` 让「�
 pnpm -r build                     # 全部 packages + apps 编译通过
 pnpm --filter @localehub/web exec next build   # 15 条路由构建成功
 pnpm -r typecheck                              # 16 个 workspace 项目全部通过
-pnpm test                                      # 132 unit tests passed（含 7 个 OpenAPI 一致性）
-pnpm test:integration                          # 74 integration tests passed（14 验收 + 12 安全 + 11 Skill 下发 + 22 成员管理 + 15 账号与审计）
+pnpm test                                      # 154 unit tests passed（含 7 个 OpenAPI 一致性、22 个 CSV/XLSX）
+pnpm test:integration                          # 80 integration tests passed（14 验收 + 12 安全 + 11 Skill 下发 + 22 成员管理 + 15 账号与审计 + 6 导入导出）
 node apps/e2e-demo/dist/run-demo.js            # ALL ACCEPTANCE CHECKS PASSED（A–E）
 docker compose config                          # valid
 docker compose -f compose.yaml -f compose.production.yaml config   # valid

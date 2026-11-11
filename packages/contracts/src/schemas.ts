@@ -21,6 +21,17 @@ export const formatIdSchema = z.enum([
   'android-xml',
 ]);
 
+/**
+ * Formats an import/export may use.
+ *
+ * Wider than `formatIdSchema` on purpose. `formatIdSchema` is the set a repository mapping may
+ * declare, and everything in it has to be writable back into the file — so `.xlsx` is excluded
+ * there: a workbook is a zip archive, "patch one cell" means regenerating it, and a mapping that
+ * could never be applied is a trap rather than a feature. Bulk editing and import validation
+ * (spec §10.1) are the job of these two formats, and that is the path this schema guards.
+ */
+export const exportFormatSchema = z.enum([...formatIdSchema.options, 'csv', 'xlsx']);
+
 export const reviewStatusSchema = z.enum(['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'STALE']);
 export const syncDirectionSchema = z.enum(['bidirectional', 'push', 'pull']);
 

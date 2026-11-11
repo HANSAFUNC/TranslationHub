@@ -65,6 +65,12 @@ export interface ExportFile {
   format: string;
   content: string;
   locale: string;
+  /**
+   * How `content` is encoded. `utf8` (the default) is text; `base64` carries a binary format such
+   * as .xlsx, which cannot survive a JSON response body any other way.
+   */
+  encoding?: 'utf8' | 'base64';
+  mimeType?: string;
 }
 
 export interface TranslationPatch {
@@ -112,4 +118,7 @@ export type FileFormatId =
   | 'ios-strings'
   | 'ios-stringsdict'
   | 'xcstrings'
-  | 'android-xml';
+  | 'android-xml'
+  /** Bulk editing and import validation (spec §10.1). Import/export, not repository sync. */
+  | 'csv'
+  | 'xlsx';

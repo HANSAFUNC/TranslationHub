@@ -5,7 +5,7 @@ import {
   Role,
   REMOTE_MCP_PROMPTS,
   canonicalizeLocaleTag,
-  formatIdSchema,
+  exportFormatSchema,
   localeTagSchema,
   selectDeliverableSkills,
 } from '@localehub/contracts';
@@ -36,7 +36,7 @@ const releaseSchema = z.object({
 
 const exportSchema = z.object({
   locale: localeTagSchema,
-  format: formatIdSchema.default('json'),
+  format: exportFormatSchema.default('json'),
   platform: z.enum(['web', 'ios', 'android', 'universal']).default('web'),
   namespace: z.string().optional(),
 });
@@ -216,6 +216,8 @@ export class PlatformController {
         contentHash: entry.contentHash,
       })),
     );
+    // `encoding` tells the client how to read `content`: text formats are inline, .xlsx is
+    // base64 because it is a zip archive. A single response shape beats two endpoints.
     return { files, entryCount: entries.length };
   }
 

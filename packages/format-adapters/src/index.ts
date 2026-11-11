@@ -8,6 +8,8 @@ import { XcstringsAdapter } from './adapters/xcstrings';
 import { AndroidXmlAdapter } from './adapters/android-xml';
 import { PoAdapter } from './adapters/po';
 import { XliffAdapter } from './adapters/xliff';
+import { CsvAdapter } from './adapters/csv';
+import { XlsxAdapter } from './adapters/xlsx';
 
 export * from './json-scan';
 export * from './json-patch-utils';
@@ -21,6 +23,9 @@ export * from './adapters/xcstrings';
 export * from './adapters/android-xml';
 export * from './adapters/po';
 export * from './adapters/xliff';
+export * from './adapters/tabular';
+export * from './adapters/csv';
+export * from './adapters/xlsx';
 
 const REGISTRY: Record<FileFormatId, () => FormatAdapter> = {
   json: () => new JsonAdapter(),
@@ -31,6 +36,8 @@ const REGISTRY: Record<FileFormatId, () => FormatAdapter> = {
   'ios-stringsdict': () => new StringsdictAdapter(),
   xcstrings: () => new XcstringsAdapter(),
   'android-xml': () => new AndroidXmlAdapter(),
+  csv: () => new CsvAdapter(),
+  xlsx: () => new XlsxAdapter(),
 };
 
 export function createAdapter(format: FileFormatId, options: { keyMode?: 'nested' | 'flat'; namespaceFromPath?: boolean } = {}): FormatAdapter {
@@ -49,6 +56,8 @@ export function supportedFormats(): FileFormatId[] {
 export function formatForExtension(filePath: string): FileFormatId | null {
   const lower = filePath.toLowerCase();
   if (lower.endsWith('.xcstrings')) return 'xcstrings';
+  if (lower.endsWith('.csv')) return 'csv';
+  if (lower.endsWith('.xlsx')) return 'xlsx';
   if (lower.endsWith('.stringsdict')) return 'ios-stringsdict';
   if (lower.endsWith('.strings')) return 'ios-strings';
   if (lower.endsWith('.xlf') || lower.endsWith('.xliff')) return 'xliff';
