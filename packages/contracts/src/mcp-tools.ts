@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { McpScope } from './roles';
 import { localeTagSchema, platformSchema } from './schemas';
 
 /**
@@ -42,9 +43,27 @@ export const REMOTE_MCP_TOOLS = [
   'submit_review',
   'get_project_sync_status',
   'get_pending_platform_changes',
+  'mark_applied',
   'validate_release',
 ] as const;
 export type RemoteMcpTool = (typeof REMOTE_MCP_TOOLS)[number];
+
+/**
+ * The scope each tool requires, mirroring the `@RequireScopes` on the REST route that does the
+ * same job. A tool with no entry needs only the role its handler asserts.
+ *
+ * The MCP server enforced roles but no scopes at all: a token issued for `project.read` alone could
+ * call `import_translations` and write. That made every scope a decoration on the one surface where
+ * the spec leans on them hardest — §2.2 requires `sync.push` and `translation.apply` to be
+ * separately granted, and `mark_applied` is precisely the operation `translation.apply` exists for.
+ */
+export const REMOTE_MCP_TOOL_SCOPES: Partial<Record<RemoteMcpTool, McpScope[]>> = {
+  // scan → preview → push, the three REST routes this tool replaces.
+  import_translations: [McpScope.REPOSITORY_SCAN, McpScope.SYNC_PREVIEW, McpScope.SYNC_PUSH],
+  review_translation_entries: [McpScope.TRANSLATION_REVIEW],
+  update_translation_draft: [McpScope.TRANSLATION_WRITE],
+  mark_applied: [McpScope.TRANSLATION_APPLY],
+};
 
 export const remoteToolSchemas = {
   /**
@@ -140,6 +159,34 @@ export const remoteToolSchemas = {
     status: z.enum(['DRAFT', 'PENDING_REVIEW', 'APPROVED']).default('APPROVED'),
     since_revision: z.number().int().nonnegative().optional(),
     limit: z.number().int().positive().max(500).default(100),
+  }),
+  /**
+   * The other half of `get_pending_platform_changes`.
+   *
+   * An agent that reads approved changes and writes them into the checkout has to be able to say
+   * so, or the platform keeps offering the same work and `validate_release` keeps counting it as
+   * outstanding. This is a claim about a machine the platform cannot see — the same claim a CLI
+   * apply report makes — so each item names the version that was written, and a version the
+   * platform has since superseded is refused instead of marked.
+   */
+  mark_applied: z.object({
+    project_id: z.string(),
+    items: z
+      .array(
+        z.object({
+          key: z.string().min(1),
+          locale: localeTagSchema,
+          platform: platformSchema,
+          file_path: z.string().max(500).optional(),
+          translation_version_id: z.string().optional(),
+        }),
+      )
+      .min(1)
+      .max(500),
+    /** `true` reports what would be marked without writing anything. Defaults to false. */
+    dry_run: z.boolean().default(false),
+    git_commit: z.string().max(100).optional(),
+    git_branch: z.string().max(200).optional(),
   }),
   validate_release: z.object({
     project_id: z.string(),

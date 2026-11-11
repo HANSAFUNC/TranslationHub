@@ -38,6 +38,40 @@ export interface SyncActor {
   actorType?: 'user' | 'mcp' | 'system';
 }
 
+export interface MarkAppliedItem {
+  key: string;
+  locale: string;
+  platform: PlatformName;
+  /** Where the agent wrote it. Optional: the platform never sees the file, so this is a label. */
+  filePath?: string | null;
+  /**
+   * The version the agent wrote, as `get_pending_platform_changes` reported it. Required for the
+   * staleness check to mean anything; omitting it is allowed but gives up the guarantee.
+   */
+  translationVersionId?: string | null;
+}
+
+/** Why one item was not marked. Reported rather than thrown, so a partial apply stays partial. */
+export type MarkAppliedSkipReason = 'NOT_FOUND' | 'ALREADY_APPLIED' | 'DRAFT_NOT_ALLOWED' | 'VERSION_SUPERSEDED';
+
+export interface MarkAppliedSkip {
+  key: string;
+  locale: string;
+  platform: string;
+  reason: MarkAppliedSkipReason;
+}
+
+export interface MarkAppliedResult {
+  dryRun: boolean;
+  projectId: string;
+  /** Null when nothing was written: a no-op must not invent a sync session. */
+  sessionId: string | null;
+  revision: number;
+  baselineUpdated: number;
+  applied: { key: string; locale: string; platform: string; filePath: string | null; translationVersionId: string | null }[];
+  skipped: MarkAppliedSkip[];
+}
+
 export interface RemoteSnapshotOptions {
   locales?: string[];
   /** include archived keys so deletions are detectable */
@@ -1233,6 +1267,316 @@ export class SyncService {
 
   /* ----------------------------------------------------------- apply report */
 
+  /**
+   * Record that one entry's text is now in the repository.
+   *
+   * Shared by the CLI's apply report and the Remote MCP's `mark_applied`, because both surfaces are
+   * asserting the same fact about a machine the platform cannot see, and the fact has to move the
+   * same three things: the entry's applied marker, the three-way baseline it is compared against
+   * next time, and the `SYNC_APPLIED` event the repository's history is built from.
+   */
+  private async recordRepositoryWrite(
+    tx: Prisma.TransactionClient,
+    params: {
+      actor: SyncActor;
+      projectId: string;
+      connectionId: string | null;
+      applyPlanId: string;
+      gitCommit: string | null;
+      viaMcp?: boolean;
+      item: {
+        key: string;
+        locale: string;
+        platform: PlatformName;
+        namespace: string;
+        filePath: string | null;
+        newValue: string;
+      };
+    },
+  ): Promise<number> {
+    const item = params.item;
+    const entry = await tx.translationEntry.findFirst({
+      where: { projectId: params.projectId, localeCode: item.locale, key: { key: item.key, platform: item.platform } },
+      select: { id: true, contentHash: true },
+    });
+    if (!entry) return 0;
+
+    await tx.translationEntry.update({
+      where: { id: entry.id },
+      data: { appliedToRepoAt: new Date(), appliedToRepoCommit: params.gitCommit },
+    });
+
+    let baselineUpdated = 0;
+    if (params.connectionId) {
+      const updated = await tx.syncBaseline.updateMany({
+        where: {
+          connectionId: params.connectionId,
+          projectId: params.projectId,
+          platform: item.platform,
+          namespace: item.namespace,
+          translationKey: item.key,
+          localeCode: item.locale,
+        },
+        data: {
+          localHash: entry.contentHash,
+          remoteHash: entry.contentHash,
+          baseValue: item.newValue,
+          lastSyncedAt: new Date(),
+        },
+      });
+      baselineUpdated = updated.count;
+    }
+
+    await emitProjectEvent(tx, {
+      organizationId: params.actor.organizationId,
+      projectId: params.projectId,
+      eventType: 'SYNC_APPLIED',
+      resourceType: 'translation_entry',
+      resourceId: entry.id,
+      payload: {
+        key: item.key,
+        locale: item.locale,
+        platform: item.platform,
+        filePath: item.filePath,
+        gitCommit: params.gitCommit,
+        applyPlanId: params.applyPlanId,
+        ...(params.viaMcp ? { viaMcp: true } : {}),
+      },
+      actorId: params.actor.userId,
+      actorType: params.actor.actorType ?? 'user',
+    });
+
+    return baselineUpdated;
+  }
+
+  /**
+   * Record that an agent wrote approved platform text into a repository.
+   *
+   * This is the platform → repository half of the loop, and until it existed the half only the CLI
+   * could close: an agent could read pending changes and write the files, but every change stayed
+   * flagged "not in the repository", so the next pull offered the same work again and
+   * `validate_release` kept counting it as outstanding.
+   *
+   * The platform cannot see the developer's disk, so this is a claim rather than an observation —
+   * the same trust a CLI apply report carries. What the platform *can* check is that the text the
+   * agent says it wrote is still the text the platform holds: every item names the version it
+   * applied, and an item whose version has been superseded is refused rather than marked. Without
+   * that check a slow agent would write yesterday's translation, mark it applied, and the platform
+   * would never offer the newer one again — a divergence in the one direction nothing else can
+   * detect.
+   */
+  async markApplied(
+    params: {
+      projectId: string;
+      items: MarkAppliedItem[];
+      gitCommit?: string | null;
+      gitBranch?: string | null;
+      client: SyncPushClientInfo;
+      dryRun?: boolean;
+    },
+    actor: SyncActor,
+  ): Promise<MarkAppliedResult> {
+    return this.tenant.withOrganization(actor.organizationId, async (tx) => {
+      const project = await tx.project.findUnique({ where: { id: params.projectId }, select: { id: true } });
+      if (!project) {
+        throw new LocaleHubError(ErrorCode.NOT_FOUND, `Project ${params.projectId} not found`, 404);
+      }
+
+      // Unapproved text reaches a repository only where the organization has said so. The same
+      // rule the REST pull path enforces, checked here because an agent marks its own work.
+      const organization = await tx.organization.findUnique({
+        where: { id: actor.organizationId },
+        select: { allowDraftApply: true },
+      });
+      const draftsAllowed = organization?.allowDraftApply ?? false;
+
+      const revision = await getProjectRevision(tx, params.projectId);
+      const resolved: { item: MarkAppliedItem; entryId: string; namespace: string; versionId: string | null; value: string }[] = [];
+      const skipped: MarkAppliedSkip[] = [];
+
+      for (const item of params.items) {
+        const entry = await tx.translationEntry.findFirst({
+          where: { projectId: params.projectId, localeCode: item.locale, key: { key: item.key, platform: item.platform } },
+          include: { key: { include: { namespace: true } } },
+        });
+        const where = { key: item.key, locale: item.locale, platform: item.platform };
+
+        if (!entry) {
+          skipped.push({ ...where, reason: 'NOT_FOUND' });
+          continue;
+        }
+        if (entry.appliedToRepoAt !== null) {
+          // Idempotent: an agent that retries after a partial failure must not be told it failed,
+          // and must not produce a second `SYNC_APPLIED` event for the same write.
+          skipped.push({ ...where, reason: 'ALREADY_APPLIED' });
+          continue;
+        }
+        if (entry.status !== 'APPROVED' && !draftsAllowed) {
+          skipped.push({ ...where, reason: 'DRAFT_NOT_ALLOWED' });
+          continue;
+        }
+        if (item.translationVersionId && entry.currentVersionId !== item.translationVersionId) {
+          skipped.push({ ...where, reason: 'VERSION_SUPERSEDED' });
+          continue;
+        }
+        resolved.push({
+          item,
+          entryId: entry.id,
+          namespace: entry.key.namespace.name,
+          versionId: entry.currentVersionId,
+          value: entry.value,
+        });
+      }
+
+      if (params.dryRun || resolved.length === 0) {
+        return {
+          dryRun: Boolean(params.dryRun),
+          projectId: params.projectId,
+          sessionId: null,
+          revision,
+          baselineUpdated: 0,
+          applied: resolved.map((row) => ({
+            key: row.item.key,
+            locale: row.item.locale,
+            platform: row.item.platform,
+            filePath: row.item.filePath ?? null,
+            translationVersionId: row.versionId,
+          })),
+          skipped,
+        };
+      }
+
+      const connectionId = await this.ensureConnection(tx, {
+        organizationId: actor.organizationId,
+        projectId: params.projectId,
+        client: params.client,
+      });
+      const applyPlanId = `mcp-${randomUUID()}`;
+      const gitCommit = params.gitCommit ?? null;
+
+      const session = await tx.syncSession.create({
+        data: {
+          organizationId: actor.organizationId,
+          projectId: params.projectId,
+          connectionId,
+          direction: 'pull',
+          status: 'RUNNING',
+          baseRevision: revision,
+          summary: { applied: resolved.length, skipped: skipped.length } as unknown as Prisma.InputJsonValue,
+          clientName: params.client.name,
+          clientVersion: params.client.version,
+          gitBranch: params.gitBranch ?? params.client.gitBranch ?? null,
+          gitCommit,
+          createdById: actor.userId,
+        },
+        select: { id: true },
+      });
+
+      let baselineUpdated = 0;
+      for (const row of resolved) {
+        baselineUpdated += await this.recordRepositoryWrite(tx, {
+          actor,
+          projectId: params.projectId,
+          connectionId,
+          applyPlanId,
+          gitCommit,
+          viaMcp: true,
+          item: {
+            key: row.item.key,
+            locale: row.item.locale,
+            platform: row.item.platform,
+            namespace: row.namespace,
+            filePath: row.item.filePath ?? null,
+            newValue: row.value,
+          },
+        });
+      }
+
+      // The same report a CLI apply leaves behind, so an agent's apply shows up in the sync history
+      // beside a person's instead of being invisible to everything that reads these tables.
+      await tx.syncApplyReport.create({
+        data: {
+          organizationId: actor.organizationId,
+          projectId: params.projectId,
+          sessionId: session.id,
+          applyPlanId,
+          status: 'SUCCEEDED',
+          // The platform never sees the file, so it cannot know the file's real hash. What it can
+          // record is a digest of the text it was told is in there — a function of the content,
+          // not of the path, which is what makes it worth keeping.
+          files: ([...new Set(resolved.map((row) => row.item.filePath).filter((path): path is string => Boolean(path)))].map(
+            (filePath) => ({
+              filePath,
+              backupPath: null,
+              contentHash: contentHash(
+                resolved
+                  .filter((row) => row.item.filePath === filePath)
+                  .map((row) => `${row.item.key}\u0001${row.item.locale}\u0001${row.value}`)
+                  .sort()
+                  .join('\u0000'),
+              ),
+            }),
+          )) as unknown as Prisma.InputJsonValue,
+          items: ([
+            ...resolved.map((row) => ({
+              key: row.item.key,
+              locale: row.item.locale,
+              namespace: row.namespace,
+              platform: row.item.platform,
+              filePath: row.item.filePath ?? null,
+              applied: true,
+              previousValue: null,
+              newValue: row.value,
+              translationVersionId: row.versionId,
+            })),
+            ...skipped.map((row) => ({
+              key: row.key,
+              locale: row.locale,
+              namespace: '',
+              platform: row.platform,
+              filePath: null,
+              applied: false,
+              previousValue: null,
+              newValue: '',
+              translationVersionId: null,
+              errorCode: row.reason,
+            })),
+          ]) as unknown as Prisma.InputJsonValue,
+          appliedCount: resolved.length,
+          failedCount: skipped.length,
+          gitCommit,
+          clientName: params.client.name,
+          clientVersion: params.client.version,
+        },
+      });
+
+      await tx.syncSession.update({
+        where: { id: session.id },
+        data: {
+          status: skipped.length ? 'PARTIAL' : 'SUCCEEDED',
+          revisionAfter: revision,
+          completedAt: new Date(),
+        },
+      });
+
+      return {
+        dryRun: false,
+        projectId: params.projectId,
+        sessionId: session.id,
+        revision,
+        baselineUpdated,
+        applied: resolved.map((row) => ({
+          key: row.item.key,
+          locale: row.item.locale,
+          platform: row.item.platform,
+          filePath: row.item.filePath ?? null,
+          translationVersionId: row.versionId,
+        })),
+        skipped,
+      };
+    });
+  }
+
   async reportApply(payload: ApplyReportRequest, actor: SyncActor): Promise<{ baselineUpdated: number; sessionId: string }> {
     return this.tenant.withOrganization(actor.organizationId, async (tx) => {
       const session = await tx.syncSession.findUnique({ where: { id: payload.syncSessionId } });
@@ -1270,51 +1614,20 @@ export class SyncService {
       let baselineUpdated = 0;
       for (const item of payload.items) {
         if (!item.applied) continue;
-        const entry = await tx.translationEntry.findFirst({
-          where: { projectId: session.projectId, localeCode: item.locale, key: { key: item.key, platform: item.platform } },
-          select: { id: true, contentHash: true },
-        });
-        if (!entry) continue;
-        await tx.translationEntry.update({
-          where: { id: entry.id },
-          data: { appliedToRepoAt: new Date(), appliedToRepoCommit: payload.gitCommit ?? null },
-        });
-        const connectionId = session.connectionId;
-        if (connectionId) {
-          const updated = await tx.syncBaseline.updateMany({
-            where: {
-              connectionId,
-              projectId: session.projectId,
-              platform: item.platform,
-              namespace: item.namespace,
-              translationKey: item.key,
-              localeCode: item.locale,
-            },
-            data: {
-              localHash: entry.contentHash,
-              remoteHash: entry.contentHash,
-              baseValue: item.newValue,
-              lastSyncedAt: new Date(),
-            },
-          });
-          baselineUpdated += updated.count;
-        }
-        await emitProjectEvent(tx, {
-          organizationId: actor.organizationId,
+        baselineUpdated += await this.recordRepositoryWrite(tx, {
+          actor,
           projectId: session.projectId,
-          eventType: 'SYNC_APPLIED',
-          resourceType: 'translation_entry',
-          resourceId: entry.id,
-          payload: {
+          connectionId: session.connectionId,
+          applyPlanId: payload.applyPlanId,
+          gitCommit: payload.gitCommit ?? null,
+          item: {
             key: item.key,
             locale: item.locale,
             platform: item.platform,
+            namespace: item.namespace,
             filePath: item.filePath,
-            gitCommit: payload.gitCommit ?? null,
-            applyPlanId: payload.applyPlanId,
+            newValue: item.newValue,
           },
-          actorId: actor.userId,
-          actorType: actor.actorType ?? 'user',
         });
       }
 

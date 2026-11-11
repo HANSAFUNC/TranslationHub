@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { Boxes, Copy, Info, KeyRound, Languages, Plug, ScrollText, Sparkles, Terminal } from 'lucide-react';
+import { Boxes, Copy, Info, KeyRound, Languages, Plug, ScrollText, ShieldAlert, Sparkles, Terminal } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -160,7 +160,7 @@ function McpOnboarding({ snippets, remoteUrl }: { snippets?: McpClientSnippets; 
       <Step
         n={2}
         title="记下你的 project_id"
-        description="十五个工具里有十四个把它当第一个参数。它同时是你项目页地址的最后一段。"
+        description="十八个工具里有十六个把它当第一个参数。它同时是你项目页地址的最后一段。"
       >
         {projects?.length ? (
           <div className="flex flex-col gap-2">
@@ -230,6 +230,32 @@ function McpOnboarding({ snippets, remoteUrl }: { snippets?: McpClientSnippets; 
           <AlertTitle>Agent 只能提建议，不能替你批准</AlertTitle>
           <AlertDescription>
             审核与发布需要人类的 REVIEWER / PROJECT_MANAGER 角色。平台会拒绝 Agent 的批准请求——这是设计，不是缺陷。
+          </AlertDescription>
+        </Alert>
+      </Step>
+
+      <Step
+        n={5}
+        title="让 Agent 写回仓库后，告诉平台它写完了"
+        description="读变更、写文件 Agent 都能做；写完之后还要说一声，否则平台会一直把同一批变更再发一遍。"
+      >
+        <p className="text-muted-foreground text-xs">
+          这是唯一需要 <code className="bg-muted rounded px-1 font-mono">translation.apply</code> scope 的工具
+          ——默认签发的 Token 有意不含它，因为「把平台译文写进仓库」比「把仓库变更推上平台」风险更高。
+          要允许，就在签发时勾上。
+        </p>
+        <CodeBlock
+          what="对 Agent 说的一句话"
+          language="bash"
+          code={`把 project_id=${first?.id ?? '<project_id>'} 已审核的 ja-JP 译文写进仓库，然后调用 mark_applied 逐条回报，先 dry_run。`}
+        />
+        <Alert variant="info">
+          <ShieldAlert />
+          <AlertTitle>平台为什么信这句话</AlertTitle>
+          <AlertDescription>
+            平台看不到你的磁盘，所以这条记录是声明。它能验证的是：你回报的
+            <code className="mx-1 font-mono text-xs">translation_version_id</code>
+            是不是它现在持有的那一版——如果你读完之后平台又改过，这条会被拒绝而不是记成已落地。
           </AlertDescription>
         </Alert>
       </Step>

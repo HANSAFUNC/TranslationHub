@@ -624,6 +624,57 @@ project_events 7 | audit_logs 0
 - `GET /organization/audit?actorType=mcp` 断言返回的每行都是 MCP、`actor.email` 是签发人、
   `mcpClient.name` 是 Token 名、前缀匹配、未撤销。
 
+### 1.29 平台 → 仓库方向没有闭环（本轮新增 `mark_applied`）
+
+上一轮把「仓库 → 平台」补齐了，但反方向是断的：Agent 能读已审核译文（`get_pending_platform_changes`）、
+能自己写文件，**却没有任何工具能说「我写完了」**。后果是 `applied_to_repo_at` 永远为空：
+
+- `get_pending_platform_changes` 每次都把同一批变更再发一遍，Agent 反复做同一件事；
+- `validate_release` 一直把它们算作「未落地」；
+- 仓库和平台明明一致，系统却认为不一致。
+
+CLI 侧这条路是通的（`apply --confirm` → `POST /sync/apply-reports`），所以缺的不是机制而是入口。
+
+新增第 18 个工具 `mark_applied`：`{ project_id, items[{key, locale, platform, file_path?, translation_version_id?}],
+dry_run, git_commit? }`。它写 `applied_to_repo_at` / `applied_to_repo_commit`、把三方比较基线推到已收敛、
+发 `SYNC_APPLIED` 事件、留 `sync.apply` 审计，并建一条 `pull` 方向的 sync session 与 apply report
+——所以 Agent 的落地在同步历史里和 CLI 的落地并排可见。
+
+**每条都要带 `translation_version_id`，这是这个工具唯一真正的安全检查。** 平台看不到开发者的磁盘，
+这条记录本质是**声明**而不是**观测**（和 CLI 的 apply report 同一种信任）。平台能验证的是「你声明的
+版本是不是它现在持有的版本」：带旧版本号的条目判为 `VERSION_SUPERSEDED` 并**拒绝标记**。否则一个慢
+半拍的 Agent 会把昨天的译文写进仓库、标记为已落地，平台从此不再下发新的那条——这是系统里唯一没有
+其他机制能发现的偏差方向。其余判定：`NOT_FOUND`、`ALREADY_APPLIED`（幂等：重复调用不报错、不重复记
+事件、不建 session）、`DRAFT_NOT_ALLOWED`（未审核文本落仓库需要组织打开 `allowDraftApply`，与 REST
+拉取同一条策略）。`dry_run=true` 只回答不写。
+
+`reportApply` 与 `markApplied` 共用抽出来的 `recordRepositoryWrite`：两边都在对一台平台看不见的机器
+做同一个断言，就必须移动同样三样东西（落地标记、基线、事件），两份实现迟早分叉。
+
+**顺带发现并修复：MCP 完全不校验 scope。** 实测确认——签一个只有 `project.read` 的 Token，调用
+`import_translations` 能成功写库。服务端只 `assertRole`，从不 `assertScope`，而 REST 路由是靠
+`@RequireScopes` 拦的。于是规格 §2.2「`sync.push` 与 `translation.apply` 必须分离授权」在唯一真正
+依赖它的入口上失效——默认签发的 Token 明确不含 `translation.apply`，但它照样能把平台变更标记为已落地。
+
+修复方式是把对应关系写进契约（`REMOTE_MCP_TOOL_SCOPES`），并在 `define` 包装层统一断言：放在包装层
+而不是各 handler 里，因为「忘了写的检查」等于「没有检查」。映射逐条对齐 REST：
+
+| 工具                         | scope                                              | 对应 REST                     |
+| ---------------------------- | -------------------------------------------------- | ----------------------------- |
+| `import_translations`        | `repository.scan` + `sync.preview` + `sync.push`    | `/sync/scans`、`/sync/preview`、`/sync/push` |
+| `update_translation_draft`   | `translation.write`                                 | `POST /translations/:id/draft` |
+| `review_translation_entries` | `translation.review`                                | `POST /translations/review`    |
+| `mark_applied`               | `translation.apply`                                 | `POST /sync/apply-reports`     |
+
+其余工具与 REST 对应路由一致：只校验角色。
+
+验证：契约层 5 个单元测试（工具与 schema 一一对应、scope 映射只引用真实工具与真实 scope、两个写工具
+的 scope 被钉住）+ 6 个新增集成测试，用真 MCP 客户端跑完整闭环：把一条译文改成 APPROVED →
+`get_pending_platform_changes` 显示未落地 → `dry_run` 不写不建 session → 确认后落地、平台不再下发、
+REST 视图一致 → 审计有 `sync.apply` 且带 `via: mark_applied` 与 commit → 重复调用幂等且不重复记账 →
+平台在期间又改了一版时旧版本号被拒（且真的什么都没改）→ 只有 `sync.push` 的 Token 调 `mark_applied`
+得到 `SCOPE_INSUFFICIENT`，但仍能做它被授权的事。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -722,13 +773,14 @@ POST /organization/members (READONLY)          # 无 token 管理成员的越权
 | GitHub Actions `CI`（main）                      | **通过**（Run 5）                       |
 | Local / Remote MCP 真实客户端握手                | 通过（见附二）                          |
 | 端到端演示连续两次运行                           | 均通过（demo 自带项目清理，可重复执行） |
-| `pnpm test`                                      | 189 passed                              |
-| `pnpm test:integration`                          | 105 passed                              |
+| `pnpm test`                                      | 194 passed                              |
+| `pnpm test:integration`                          | 113 passed                              |
 | `node apps/e2e-demo/dist/run-demo.js`            | ALL ACCEPTANCE CHECKS PASSED            |
 | `docker compose config`（含 production overlay） | valid                                   |
 | `docker compose up -d --build`（整套栈）         | 5 个服务全部起，浏览器实测 24/24        |
 | `docker buildx build --network host`             | api / web 镜像均构建成功（见下方说明）  |
 | 容器栈上的 MCP 写入 → 审计页（无头 Chrome）      | 通过：`/settings/audit` 的「Agent 操作」筛出 100 行，每行标出 Token 名与前缀 |
+| `/mcp` 教程页第五步（无头 Chrome）               | 通过：5 个步骤、闭环说明与 `translation_version_id` 提示均渲染，无溢出     |
 | `docker build -f docker/api.Dockerfile .`        | 见下方说明                              |
 
 Docker 镜像构建第一次因 Dockerfile 在 `prisma generate` 之前编译 `packages/database` 而失败
@@ -761,13 +813,17 @@ docker buildx build --network host -f docker/web.Dockerfile -t localehub-web .
 
 ## 附二：MCP 传输层实测
 
-平台只有一个 MCP，下表的「工具」一列是它的 17 个平台工具；本地动作在 CLI 里，另表列出。
+平台只有一个 MCP，下表的「工具」一列是它的 18 个平台工具；本地动作在 CLI 里，另表列出。
 
 | 验证                                                | 结果                                                                                            |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | Remote MCP（Streamable HTTP）被真实 MCP Client 连接 | `connected: localehub-remote 0.1.0`                                                             |
-| Remote MCP 工具数                                   | 17（规格 §6.4 的 15 个 + `create_project` / `import_translations`，见 §1.27）                   |
-| MCP 写入是否进审计                                  | 是：6 个写工具写 `audit_logs`，`actor_type='mcp'`，只读与 dry-run 不写（集成测试断言，见 §1.28） |
+| Remote MCP 工具数                                   | 18（规格 §6.4 的 15 个 + `create_project` / `import_translations` / `mark_applied`，见 §1.27、§1.29） |
+| MCP 是否校验 Token scope                            | 是：`REMOTE_MCP_TOOL_SCOPES` 在包装层统一断言，映射逐条对齐 REST（集成测试断言，见 §1.29）      |
+| MCP 写入是否进审计                                  | 是：7 个写工具写 `audit_logs`，`actor_type='mcp'`，只读与 dry-run 不写（集成测试断言，见 §1.28） |
+| `mark_applied` 闭环（容器栈实测）                   | 通过：pending → dry-run（不建 session）→ 确认（建 session）→ 平台不再下发 → 审计有 `sync.apply` |
+| 只带 `project.read` 的 Token 调 `import_translations` | 被拒（`SCOPE_INSUFFICIENT`）——修复前实测可写库，见 §1.29                                    |
+| 只带 `sync.push` 的 Token 调 `mark_applied`         | 被拒（`SCOPE_INSUFFICIENT: translation.apply`）                                              |
 | Remote MCP 是否暴露本地文件工具                     | 否（检查 `read_local_file` / `write_local_file` / `read_file` / `exec` 均不存在）               |
 | `list_projects` / `get_project_sync_status`         | 正常返回                                                                                        |
 | Remote MCP Resources / Prompts                      | 7 / 7（`qa-rules` + `skills` + `skills/{slug}` + 3 个 Skill resource；2 内置 + 5 Skill prompt） |
@@ -817,3 +873,4 @@ docker buildx build --network host -f docker/web.Dockerfile -t localehub-web .
 | `/mcp/tools` 声明了 6 条未实现的 resource 与 1 个已删除 Server 的 prompt | 发现接口高估能力                                   | 资源/prompt 清单进契约，集成测试断言「声明 == 实际注册」                       |
 | 浏览器端硬编码 API 主机                                                  | 反向代理部署下前端打不到 API                       | 未配置 `NEXT_PUBLIC_API_BASE_URL` 时回退到同源 `/api/v1`                       |
 | MCP 的写入不写审计（`audit_logs` 对 Agent 全盲）                         | 审计页看不到任何 MCP 操作，无法追溯、无法撤销对应 Token | 抽 `packages/domain/src/audit.ts`，六个写工具补审计 + 8 单元 / 2 集成测试（见 §1.28） |
+| MCP 完全不校验 Token scope（只有 `project.read` 也能写库）               | 规格 §2.2 的 scope 分离在唯一依赖它的入口上失效，默认 Token 能把平台变更标记为已落地 | 契约里声明 `REMOTE_MCP_TOOL_SCOPES`，`define` 包装层统一断言 + 5 单元 / 1 集成测试（见 §1.29） |

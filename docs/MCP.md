@@ -200,6 +200,7 @@ MCP 的写工具与 REST 写入**同一张 `audit_logs`**，所以「谁在什�
 | `review_translation_entries` | `translation.review`        | 决定、处理数、跳过数、备注                           |
 | `update_translation_draft`   | `translation.draft_update`  | key、locale、新版本 id（仅真正发生改动时）           |
 | `submit_review`              | `translation.submit_review` | 提交数、跳过数、备注                                 |
+| `mark_applied`               | `sync.apply`                | `via: mark_applied`、条数、跳过原因、git commit      |
 
 - `actor_type` 为 `mcp`，`actor_id` 是 Token 所属用户，`mcp_client_id` 是具体那一把 Token
   ——「有人半夜推了四十个 key」因此能落到「哪把 Token」，可以直接撤销它。
@@ -213,6 +214,61 @@ MCP 的写工具与 REST 写入**同一张 `audit_logs`**，所以「谁在什�
   审计页就会声称一次没发生的审核「已批准」。
 - `import_translations` 用的 action 与 REST 推送相同（`sync.push`），因为那本来就是同一件事；
   区分入口的是 `metadata.via`。
+
+### 2.5 平台 → 仓库：闭环怎么合上
+
+§2.4 之前，只有「仓库 → 平台」是通的：Agent 能读已审核译文、能自己写文件，但**没有任何工具能说
+「我写完了」**。于是 `applied_to_repo_at` 永远为空，`get_pending_platform_changes` 每次都把同一批
+变更再发一遍，`validate_release` 也一直把它们算作未落地。
+
+`mark_applied` 补上这一半：
+
+```jsonc
+{
+  "project_id": "...",
+  "dry_run": false,
+  "git_commit": "abc1234",
+  "items": [
+    { "key": "checkout.title", "locale": "ja-JP", "platform": "web",
+      "file_path": "locales/ja-JP/common.json",
+      "translation_version_id": "…" }   // get_pending_platform_changes 给的
+  ]
+}
+```
+
+它做四件事：写 `applied_to_repo_at` / `applied_to_repo_commit`、把三方比较的基线推到已收敛、
+发一条 `SYNC_APPLIED` 事件、留一条 `sync.apply` 审计。还会建一条 `pull` 方向的 sync session 与
+apply report，所以 Agent 的落地在同步历史里和人跑 CLI 的落地并排可见，而不是只有它自己知道。
+
+**为什么每条都要带 `translation_version_id`。** 平台看不到开发者的磁盘，这条记录本质是**声明**
+而不是**观测**——和 CLI 的 apply report 同一种信任。平台能验证的是：你声明的那个版本，是不是它现在
+持有的版本。带旧版本号的条目会被判为 `VERSION_SUPERSEDED` 并**拒绝标记**：否则一个慢半拍的 Agent
+会把昨天的译文写进仓库、标记为已落地，平台从此再也不会下发新的那条——这是系统里唯一没有任何其他
+机制能发现的偏差方向。
+
+其余判定：`NOT_FOUND`（没有这个 key）、`ALREADY_APPLIED`（重复调用是幂等的，不报错也不重复记事件）、
+`DRAFT_NOT_ALLOWED`（未审核文本要落仓库，需要组织打开 `allowDraftApply`，与 REST 拉取同一条策略）。
+`dry_run=true` 只回答不写，也不建 session。全部条目都没被接受时同样不建 session——空操作不该在历史
+里留下一行。
+
+### 2.6 Scope 是硬约束（本轮修复）
+
+在此之前，MCP 服务端**只校验角色、完全不校验 scope**：一个只签了 `project.read` 的 Token 可以调用
+`import_translations` 写库（实测确认）。这让规格 §2.2 的「`sync.push` 与 `translation.apply` 必须
+分离授权」在唯一真正依赖它的入口上失效。
+
+现在工具与 scope 的对应关系写在契约里（`REMOTE_MCP_TOOL_SCOPES`），并在 `define` 包装层统一断言
+——放在包装层而不是各个 handler 里，是因为「忘了写的检查」等于「没有检查」：
+
+| 工具                         | 需要的 scope                                |
+| ---------------------------- | ------------------------------------------- |
+| `import_translations`        | `repository.scan` + `sync.preview` + `sync.push` |
+| `update_translation_draft`   | `translation.write`                         |
+| `review_translation_entries` | `translation.review`                        |
+| `mark_applied`               | `translation.apply`                         |
+
+其余工具与 REST 对应路由一致：只需要角色。`translation.apply` 不在默认 scope 集合里，所以默认签发的
+Token 推得上去、落不下来——这正是规格要的分离。
 
 ## 3. 本地仓库操作：CLI（不是 MCP）
 
@@ -283,7 +339,7 @@ Server 每个请求建一次（无状态），所以 Skill 是**实时**的：�
 不需要重启任何客户端。
 
 取数走数据库、受 RLS 约束，与 `GET /skills` 的可见性规则一致。查询失败时只记 stderr 并返回空清单
-——Skill 是附加能力，不能因为读不到它而让 17 个工具一起报错。
+——Skill 是附加能力，不能因为读不到它而让 18 个工具一起报错。
 
 ## 5. Token 与 Scope
 

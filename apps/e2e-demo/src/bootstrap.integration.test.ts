@@ -95,7 +95,7 @@ beforeAll(async () => {
     token: session.token,
     body: {
       name: 'bootstrap-suite',
-      scopes: ['project.read', 'repository.scan', 'sync.preview', 'sync.push', 'translation.read'],
+      scopes: ['project.read', 'repository.scan', 'sync.preview', 'sync.push', 'translation.read', 'translation.apply'],
       projectIds: [],
       expiresInDays: 1,
     },
@@ -399,6 +399,235 @@ describe('creating a project', () => {
     expect(trail.body.data!.every((entry) => entry.actorType === 'mcp')).toBe(true);
   });
 
+  /**
+   * The other direction.
+   *
+   * Everything above is the repository telling the platform what it has. This is the platform
+   * telling it — or rather, the agent saying it has written what the platform asked for. Without
+   * it the loop never closes: the same changes are offered by every pull, and `validate_release`
+   * keeps counting them as outstanding, because nothing ever says "this text is in the repository".
+   */
+  describe('reporting a write back into the repository', () => {
+    // The entry every step below works on, named rather than positional: the list orders by a
+    // UUID, so "the first item" is a different key on every run.
+    const KEY = 'checkout.title';
+    const filePath = 'locales/ja-JP/common.json';
+    let entryId = '';
+    let versionId = '';
+
+    interface PendingChanges {
+      changes: {
+        entryId: string;
+        key: string;
+        locale: string;
+        platform: string;
+        translationVersionId: string;
+        content: string;
+        appliedToRepo: boolean;
+      }[];
+    }
+
+    interface MarkResult {
+      dryRun: boolean;
+      sessionId: string | null;
+      applied: { key: string; locale: string; platform: string; filePath: string | null }[];
+      skipped: { key: string; locale: string; reason: string }[];
+      baselineUpdated: number;
+    }
+
+    const pending = async () => {
+      const result = await client!.callTool({
+        name: 'get_pending_platform_changes',
+        arguments: { project_id: projectId, locale: 'ja-JP' },
+      });
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      return payload<PendingChanges>(result);
+    };
+
+    const mark = async (arguments_: Record<string, unknown>) =>
+      client!.callTool({ name: 'mark_applied', arguments: arguments_ });
+
+    it('starts with an approved change the platform has not seen in the repository', async () => {
+      const entries = await call<{ items: { entryId: string; key: string }[] }>(
+        `/projects/${projectId}/translations?locale=ja-JP`,
+        { token: session.token },
+      );
+      const listed = entries.body.data!.items.find((entry) => entry.key === KEY);
+      expect(listed, `no ${KEY} entry in ja-JP`).toBeTruthy();
+      entryId = listed!.entryId;
+
+      const draft = await call(`/projects/${projectId}/translations/${entryId}/draft`, {
+        method: 'POST',
+        token: session.token,
+        body: { value: 'お会計（レビュー済み）' },
+      });
+      expect(draft.status, JSON.stringify(draft.body.error)).toBe(201);
+      const review = await call(`/projects/${projectId}/translations/review`, {
+        method: 'POST',
+        token: session.token,
+        body: { entryIds: [entryId], decision: 'APPROVE' },
+      });
+      expect(review.status, JSON.stringify(review.body.error)).toBe(201);
+
+      const changes = await pending();
+      const change = changes.changes.find((row) => row.entryId === entryId);
+      expect(change).toBeTruthy();
+      expect(change!.appliedToRepo).toBe(false);
+      versionId = change!.translationVersionId;
+      expect(versionId).toMatch(/^[0-9a-f-]{36}$/);
+    });
+
+    it('answers a dry run without writing anything', async () => {
+      const result = await mark({
+        project_id: projectId,
+        dry_run: true,
+        items: [{ key: KEY, locale: 'ja-JP', platform: 'web', translation_version_id: versionId, file_path: filePath }],
+      });
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      const reported = payload<MarkResult>(result);
+      expect(reported.dryRun).toBe(true);
+      // A no-op must not invent a sync session, or the history fills with applies that never were.
+      expect(reported.sessionId).toBeNull();
+      expect(reported.applied).toHaveLength(1);
+
+      const changes = await pending();
+      expect(changes.changes.find((row) => row.entryId === entryId)?.appliedToRepo).toBe(false);
+    });
+
+    it('marks the change once it is confirmed, and stops offering it', async () => {
+      const result = await mark({
+        project_id: projectId,
+        dry_run: false,
+        git_commit: 'abc1234',
+        items: [{ key: KEY, locale: 'ja-JP', platform: 'web', translation_version_id: versionId, file_path: filePath }],
+      });
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      const reported = payload<MarkResult>(result);
+      expect(reported.applied).toHaveLength(1);
+      expect(reported.skipped).toEqual([]);
+      expect(reported.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+
+      // The loop is closed: the platform no longer offers it.
+      const changes = await pending();
+      expect(changes.changes.find((row) => row.entryId === entryId)?.appliedToRepo).toBe(true);
+
+      // And the REST view agrees, because both read the same column.
+      const detail = await call<{ appliedToRepoAt: string | null }>(
+        `/projects/${projectId}/translations/${entryId}`,
+        { token: session.token },
+      );
+      expect(detail.body.data?.appliedToRepoAt).toBeTruthy();
+    });
+
+    it('leaves a trail, because the platform is taking the agent at its word', async () => {
+      const audited = await call<{ action: string; metadata: Record<string, unknown>; syncSessionId: string | null }[]>(
+        `/projects/${projectId}/audit`,
+        { token: session.token },
+      );
+      const row = audited.body.data?.find((entry) => entry.action === 'sync.apply');
+      expect(row).toBeTruthy();
+      expect(row!.metadata.via).toBe('mark_applied');
+      expect(row!.metadata.applied).toBe(1);
+      expect(row!.metadata.gitCommit).toBe('abc1234');
+      expect(row!.syncSessionId).toMatch(/^[0-9a-f-]{36}$/);
+    });
+
+    it('is idempotent: a retry is not an error and does not record a second apply', async () => {
+      const result = await mark({
+        project_id: projectId,
+        dry_run: false,
+        items: [{ key: KEY, locale: 'ja-JP', platform: 'web', translation_version_id: versionId, file_path: filePath }],
+      });
+      const reported = payload<MarkResult>(result);
+      expect(reported.applied).toEqual([]);
+      expect(reported.skipped).toEqual([{ key: KEY, locale: 'ja-JP', platform: 'web', reason: 'ALREADY_APPLIED' }]);
+      expect(reported.sessionId).toBeNull();
+
+      const audited = await call<{ action: string }[]>(`/projects/${projectId}/audit`, { token: session.token });
+      expect(audited.body.data!.filter((entry) => entry.action === 'sync.apply')).toHaveLength(1);
+    });
+
+    it('refuses to mark a version the platform has moved past', async () => {
+      // Someone edits the same entry again while the agent is still working. Marking the old text
+      // as applied would tell the platform its new text is in the repository when it is not, and
+      // nothing else in the system could ever detect that.
+      const draft = await call(`/projects/${projectId}/translations/${entryId}/draft`, {
+        method: 'POST',
+        token: session.token,
+        body: { value: 'お会計（さらに新しい）' },
+      });
+      expect(draft.status, JSON.stringify(draft.body.error)).toBe(201);
+      await call(`/projects/${projectId}/translations/review`, {
+        method: 'POST',
+        token: session.token,
+        body: { entryIds: [entryId], decision: 'APPROVE' },
+      });
+
+      const result = await mark({
+        project_id: projectId,
+        dry_run: false,
+        items: [{ key: KEY, locale: 'ja-JP', platform: 'web', translation_version_id: versionId, file_path: filePath }],
+      });
+      const reported = payload<MarkResult>(result);
+      expect(reported.applied).toEqual([]);
+      expect(reported.skipped).toEqual([
+        { key: KEY, locale: 'ja-JP', platform: 'web', reason: 'VERSION_SUPERSEDED' },
+      ]);
+
+      // The stale claim changed nothing: the change is still outstanding, with its new version.
+      const changes = await pending();
+      const change = changes.changes.find((row) => row.entryId === entryId);
+      expect(change?.appliedToRepo).toBe(false);
+      expect(change?.translationVersionId).not.toBe(versionId);
+      // The reason is in the payload the agent reads, not only in this test's assertions.
+      expect(reported.skipped[0]?.reason).toBe('VERSION_SUPERSEDED');
+      expect(JSON.stringify(result.content)).toContain('Re-run get_pending_platform_changes');
+    });
+
+    it('requires the translation.apply scope, which is not in the default set', async () => {
+      // Spec §2.2: pushing local changes up and writing platform changes down are separately
+      // granted. The token below can push; it must not be able to mark.
+      const issued = await call<{ token: string }>('/mcp-tokens', {
+        method: 'POST',
+        token: session.token,
+        body: {
+          name: `no-apply-${runId}`,
+          scopes: ['project.read', 'repository.scan', 'sync.preview', 'sync.push', 'translation.read'],
+          projectIds: [projectId],
+          expiresInDays: 1,
+        },
+      });
+      const pusher = new Client({ name: 'no-apply', version: '0' });
+      await pusher.connect(
+        new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${MCP_PORT}/mcp`), {
+          requestInit: { headers: { authorization: `Bearer ${issued.body.data!.token}` } },
+        }),
+      );
+      try {
+        const refused = await pusher.callTool({
+          name: 'mark_applied',
+          arguments: {
+            project_id: projectId,
+            dry_run: false,
+            items: [{ key: KEY, locale: 'ja-JP', platform: 'web' }],
+          },
+        });
+        expect(refused.isError).toBe(true);
+        expect(JSON.stringify(refused.content)).toContain('SCOPE_INSUFFICIENT');
+        expect(JSON.stringify(refused.content)).toContain('translation.apply');
+
+        // The same token can still do what it was issued for.
+        const allowed = await pusher.callTool({
+          name: 'get_pending_platform_changes',
+          arguments: { project_id: projectId, locale: 'ja-JP' },
+        });
+        expect(allowed.isError, JSON.stringify(allowed.content)).toBeFalsy();
+      } finally {
+        await pusher.close();
+      }
+    });
+  });
+
   it('refuses a project the token is not bound to', async () => {
     const other = await call<{ id: string }>('/projects', {
       method: 'POST',
@@ -410,7 +639,9 @@ describe('creating a project', () => {
       token: session.token,
       body: {
         name: 'narrow',
-        scopes: ['repository.scan', 'sync.push'],
+        // All three, so this token fails on the project binding rather than on a missing scope —
+        // which is what the test is about.
+        scopes: ['repository.scan', 'sync.preview', 'sync.push'],
         // Bound to the first project only.
         projectIds: [projectId],
         expiresInDays: 1,

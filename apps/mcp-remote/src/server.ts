@@ -24,9 +24,10 @@ import {
   REMOTE_MCP_PROMPTS,
   skillPromptArgs,
   type DeliveredSkill,
+  REMOTE_MCP_TOOL_SCOPES,
   type RemoteMcpTool,
 } from '@localehub/contracts';
-import { assertProjectBound, assertRole, type ActorContext } from '@localehub/permissions';
+import { assertProjectBound, assertRole, assertScope, type ActorContext } from '@localehub/permissions';
 import { TenantPrisma } from '@localehub/database';
 
 /**
@@ -114,6 +115,7 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     'review_translation_entries',
     'update_translation_draft',
     'submit_review',
+    'mark_applied',
   ]);
 
   /**
@@ -152,6 +154,9 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
       { description, inputSchema: schema.shape ?? schema._def?.schema?.shape ?? {}, annotations },
       async (input: unknown) => {
         try {
+          // Before the handler, not inside it: a tool that forgets the check is a tool that has no
+          // check, and this is the one place every tool goes through.
+          for (const scope of REMOTE_MCP_TOOL_SCOPES[name] ?? []) assertScope(actor, scope);
           const result = await handler(input as never);
           return {
             content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
@@ -704,6 +709,69 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
         },
         actor,
       );
+    },
+  );
+
+  define(
+    'mark_applied',
+    '告诉平台：这些已审核译文已经写进仓库了（由你完成写入）。用 get_pending_platform_changes 拿到的 ' +
+      'translationVersionId 逐条回报；平台据此停止再次下发这些变更。先 dry_run=true 预演。',
+    async (input: {
+      project_id: string;
+      items: { key: string; locale: string; platform: string; file_path?: string; translation_version_id?: string }[];
+      dry_run: boolean;
+      git_commit?: string;
+      git_branch?: string;
+    }) => {
+      assertRole(actor, input.project_id, Role.DEVELOPER);
+      assertProjectBound(actor, input.project_id);
+
+      const result = await sync.markApplied(
+        {
+          projectId: input.project_id,
+          items: input.items.map((item) => ({
+            key: item.key,
+            locale: item.locale,
+            platform: item.platform as never,
+            filePath: item.file_path ?? null,
+            translationVersionId: item.translation_version_id ?? null,
+          })),
+          gitCommit: input.git_commit ?? null,
+          gitBranch: input.git_branch ?? null,
+          dryRun: input.dry_run,
+          client: { name: 'localehub-remote-mcp', version: '0.1.0' },
+        },
+        actor,
+      );
+
+      // Same action name the REST apply-report uses, because it is the same fact; `via` says which
+      // surface asserted it. Nothing is recorded for a dry run — it is a question, not a claim.
+      if (!result.dryRun && result.applied.length > 0) {
+        await audit({
+          action: 'sync.apply',
+          resourceType: 'sync_apply_report',
+          resourceId: result.sessionId,
+          projectId: input.project_id,
+          syncSessionId: result.sessionId,
+          metadata: {
+            via: 'mark_applied',
+            applied: result.applied.length,
+            skipped: result.skipped.length,
+            reasons: result.skipped.map((row) => row.reason),
+            gitCommit: input.git_commit ?? null,
+          },
+        });
+      }
+
+      return {
+        ...result,
+        nextStep: result.skipped.length
+          ? 'Re-run get_pending_platform_changes. Items reported as VERSION_SUPERSEDED were changed on ' +
+            'the platform after you read them: write the new text and report again.'
+          : result.applied.length
+            ? 'Recorded. Run localehub scan / sync preview to confirm the platform and the repository agree.'
+            : 'Nothing was marked.',
+      };
     },
   );
 
