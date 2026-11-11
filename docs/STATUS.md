@@ -557,10 +557,16 @@ docker compose build api worker mcp-remote web && docker compose up -d --force-r
 `localehub init` 与 `create_project` 也共用 `packages/workspace/src/config-template.ts` 的模板，
 所以「命令行初始化」与「Agent 初始化」产出的配置文件逐字一致。
 
-**容器状态**：本轮的 `docker compose build` 因 Docker Hub 认证失败（`failed to fetch oauth token: … EOF`）
-没能装进镜像，因此容器栈仍是上一版——**但功能正常**，因为本轮没有数据库迁移，缺的只是两个新工具。
-本地进程验证全部通过；网络稳定后 `docker compose build api worker mcp-remote web && docker compose up -d
---force-recreate` 即可。
+**容器状态**：BuildKit 因 Docker Hub 认证失败（`failed to fetch oauth token: … EOF`）无法构建，但旧版
+构建器可用——它直接使用本地已有的基础镜像，不需要 registry 认证：
+
+```bash
+DOCKER_BUILDKIT=0 docker compose build api worker mcp-remote web && docker compose up -d --force-recreate
+```
+
+已用这条路重建并验证：容器栈的 `/mcp/tools` 返回 **17 个工具**（含 `create_project` /
+`import_translations`），104 个集成测试与 demo 对着容器栈通过，并用真实 MCP 客户端在容器上走完了
+建项目 → 返回配置 → dry-run → 确认导入（`{"created":2,...}`）。
 
 验证：6 个集成测试（真库 + 真 API + 真 MCP 进程 + 真 Streamable HTTP 客户端）。其中最关键的一条是
 **把 `create_project` 返回的配置文本喂给 `localConfigSchema` 校验**——一个「看起来对但 CLI 不接受」的
