@@ -313,6 +313,32 @@ OpenAPI 文档和 MCP Tool Schema 完整」。
 OpenAPI 工具都会找不到 `openapi` 字段。新增 `@RawResponse()` 让「描述 API 的文档」不属于「API 的
 资源」，这是唯一一处豁免。
 
+### 1.18 账号生命周期与组织审计（本轮新增）
+
+补掉上一轮成员管理之后暴露出的几个缺口——它们都是「接口建好了，但人用不了」或「出事了查不到」：
+
+| 缺口                      | 现在                                                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 改不了自己的密码          | `PATCH /auth/password`：需提供当前密码；管理员重置接口本来就拒绝操作自己，而平台没有邮件通道，此前本人**完全无法**轮换密码                                                                                   |
+| 无法停用账号              | `PATCH /organization/members/:userId/status` + `users.deactivated_at`。暂停保留成员关系、项目角色与审计，但**现有**会话与 MCP Token 立即失效（`AuthGuard` 每请求检查），登录也被拒。不能暂停自己或唯一所有者 |
+| 成员变更查不到            | `GET /organization/audit`（`?action=member.` 前缀筛选）+ `/settings/audit` 页。此前 `audit_logs` 一直在写，但唯一的读接口是项目级的，「谁把谁提权了」在全产品里无处可查                                      |
+| 多组织登录是随机的        | 登录接受 `organizationId`，不传时进入 `last_organization_id`（新增列）记录的上次组织；传了不存在的组织返回 403 而**不是静默换一个**（见下）                                                                  |
+| 多组织切换没有 UI         | 顶栏用户菜单里加组织切换（仅在属于多个组织时出现），切换后整页重载——所有已缓存页面都是按上一个组织取的                                                                                                       |
+| `/system/queues` 无需认证 | 改为要求平台管理员。存活/就绪探针仍用公开的 `/health`、`/health/ready`                                                                                                                                       |
+
+**测试抓到的一个真问题**：我最初用 `??` 链写组织选择，结果是「请求了不属于自己的组织」会**静默回退**到
+另一个组织——调用方要的是 X，拿到的是 Y，之后所有写入都会落在 Y。集成测试直接把它照出来了
+（期望 403，实得 201）。改成显式分支：给了 `organizationId` 就必须命中，否则 403。
+
+`deactivated_at` 与 `last_organization_id` 两个字段都是可空、默认 NULL，迁移不重写表。
+
+验证：15 个集成测试（真库 + 真 API）覆盖改密码（当前密码错误 401、旧密码失效、MCP Token 被拒、写审计）、
+暂停（现有会话 403 `ACCOUNT_DEACTIVATED`、已签发的 MCP Token 同样失效、新登录被拒、恢复后可用、不能暂停
+自己/唯一所有者、写审计）、审计（普通成员 403、跨组织不可见、记录操作者与目标）、登录选组织（进入指定组织、
+记住上次、拒绝不属于的组织）、队列接口（无凭据 401、平台管理员 200、普通管理员 403）。
+无头 Chrome 实测四个新/改页面均渲染真实数据、无报错、无横向溢出，并真实点击完成一次「暂停 → 徽章出现 →
+恢复」。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -329,6 +355,7 @@ OpenAPI 工具都会找不到 `openapi` 字段。新增 `@RawResponse()` 让「�
 | Webhook 事件推送                                    | **未实现** | 目前依赖 `since_revision` 游标拉取                                                                                                                                                                                                                                                                                                                                                      |
 | 多组织切换 UI                                       | 部分       | API 支持 `switch-organization`，UI 只展示列表                                                                                                                                                                                                                                                                                                                                           |
 | 用户管理（建号 / 角色 / 项目角色）                  | **已完成** | 无邀请、无自助注册：管理员在 `/settings/members` 直接建号（邮箱+姓名+初始密码+角色）、改组织角色、分配项目角色与语言范围、重置密码、移出组织。API 与守卫见 §1.14                                                                                                                                                                                                                        |
+| 会话列表 / 远程登出                                 | **未实现** | 没有 `UserSession` 表，改密码不会注销其他设备，也无法查看「我在哪些设备登录过」。要立即切断访问只能靠暂停账号（见 §1.18）                                                                                                                                                                                                                                                               |
 | 前端单元测试                                        | **未实现** | 仓库里没有 Playwright / RTL 用例，也没有进 CI 的浏览器测试。人工验证用无头 Chrome（CDP）脚本，判定标准是「页面出现真实数据且无错误提示」，不是 HTTP 200——后者在 API 全挂时依然成立，本文件 §1.10 就是这么被骗过一次的                                                                                                                                                                   |
 | Docker 镜像与整套 compose 栈                        | **已完成** | `docker compose up -d --build` 起全套（postgres / redis / api / worker / mcp-remote / web）。无头 Chrome 实测 24/24：登录后首页、9 条路由与两张项目详情页都渲染出真实数据（不是只 HTTP 200），`/mcp`「客户端配置」三个片段可渲染可复制，桌面与 390px 均无横向溢出；Remote MCP 用 SDK 客户端握手 15 个工具，本地文件类工具未暴露。**过程中发现并修掉两个只在容器里出现的缺陷，见 §1.10** |
 | i18n Adapter：JSON 数组/ICU AST                     | 部分       | ICU 复数以字符串形式保存，非 AST 级编辑                                                                                                                                                                                                                                                                                                                                                 |
@@ -364,7 +391,7 @@ pnpm -r build                     # 全部 packages + apps 编译通过
 pnpm --filter @localehub/web exec next build   # 15 条路由构建成功
 pnpm -r typecheck                              # 16 个 workspace 项目全部通过
 pnpm test                                      # 132 unit tests passed（含 7 个 OpenAPI 一致性）
-pnpm test:integration                          # 59 integration tests passed（14 验收 + 12 安全 + 11 Skill 下发 + 22 成员管理）
+pnpm test:integration                          # 74 integration tests passed（14 验收 + 12 安全 + 11 Skill 下发 + 22 成员管理 + 15 账号与审计）
 node apps/e2e-demo/dist/run-demo.js            # ALL ACCEPTANCE CHECKS PASSED（A–E）
 docker compose config                          # valid
 docker compose -f compose.yaml -f compose.production.yaml config   # valid

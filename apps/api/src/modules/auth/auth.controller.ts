@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Res } from '@nestjs/common';
 import { z } from 'zod';
 import type { Response } from 'express';
 import { ErrorCode, LocaleHubError } from '@localehub/contracts';
@@ -23,6 +23,16 @@ const registerSchema = z.object({
 });
 
 const switchOrgSchema = z.object({ organizationId: z.string().uuid() });
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(200),
+  newPassword: z.string().min(10).max(200),
+});
+
+const loginSchemaWithOrg = loginSchema.extend({
+  /** Which organization to open when the account belongs to several. */
+  organizationId: z.string().uuid().optional(),
+});
 
 @Controller('auth')
 export class AuthController {
@@ -74,7 +84,10 @@ export class AuthController {
 
   @Public()
   @Post('login')
-  async login(@Body(zodBody(loginSchema)) body: z.infer<typeof loginSchema>, @Res({ passthrough: true }) response: Response) {
+  async login(
+    @Body(zodBody(loginSchemaWithOrg)) body: z.infer<typeof loginSchemaWithOrg>,
+    @Res({ passthrough: true }) response: Response,
+  ) {
     // Login runs before any tenant is known -> privileged read, keyed by the user's email.
     const user = await this.prisma.tenant.withoutTenantScope((tx) =>
       tx.user.findUnique({
@@ -85,11 +98,38 @@ export class AuthController {
     if (!user || !(await verifyPassword(body.password, user.passwordHash))) {
       throw new LocaleHubError(ErrorCode.INVALID_TOKEN, 'Invalid email or password', 401);
     }
-    const membership = user.memberships[0];
+    // Checked before a token is issued, so a suspended account never holds a working credential.
+    if (user.deactivatedAt) {
+      throw new LocaleHubError(ErrorCode.ACCOUNT_DEACTIVATED, 'This account has been suspended', 403);
+    }
+    // Which organization to open. Previously this was `memberships[0]`, i.e. whatever order the
+    // database happened to return — and an admin can attach an existing account to a second
+    // organization, so a person in two tenants could land in either one at random. Callers can
+    // now choose; the response always lists the rest so the UI can offer a switch.
+    let membership;
+    if (body.organizationId) {
+      // An explicit choice is honoured or refused — never quietly substituted. Falling back to a
+      // different organization here would sign somebody into a tenant they did not ask for, and
+      // every subsequent write would land there.
+      membership = user.memberships.find((m) => m.organizationId === body.organizationId);
+      if (!membership) {
+        throw new LocaleHubError(
+          ErrorCode.ORGANIZATION_ACCESS_DENIED,
+          'You are not a member of that organization',
+          403,
+        );
+      }
+    } else {
+      membership =
+        user.memberships.find((m) => m.organizationId === user.lastOrganizationId) ?? user.memberships[0];
+    }
     if (!membership) {
       throw new LocaleHubError(ErrorCode.ORGANIZATION_ACCESS_DENIED, 'User has no organization membership', 403);
     }
-    await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date(), lastOrganizationId: membership.organizationId },
+    });
     const token = issueSessionToken({
       sub: user.id,
       org: membership.organizationId,
@@ -144,6 +184,7 @@ export class AuthController {
     if (!membership) {
       throw new LocaleHubError(ErrorCode.ORGANIZATION_ACCESS_DENIED, 'You are not a member of that organization', 403);
     }
+    await this.prisma.user.update({ where: { id: actor.userId }, data: { lastOrganizationId: body.organizationId } });
     const token = issueSessionToken({
       sub: membership.userId,
       org: body.organizationId,
@@ -154,6 +195,44 @@ export class AuthController {
     });
     setSessionCookie(response, token);
     return { token };
+  }
+
+  /**
+   * Change your own password.
+   *
+   * Admins can reset someone else's (`POST /organization/members/:userId/password`), but before
+   * this there was no way to change your own at all — the admin route explicitly refuses to act
+   * on yourself, and there is no email channel to fall back on.
+   */
+  @Patch('password')
+  async changePassword(
+    @Actor() actor: ActorContext,
+    @Body(zodBody(changePasswordSchema)) body: z.infer<typeof changePasswordSchema>,
+  ) {
+    if (actor.kind !== 'user') {
+      throw new LocaleHubError(ErrorCode.SCOPE_INSUFFICIENT, 'MCP tokens cannot change passwords', 403);
+    }
+    const user = await this.prisma.tenant.withoutTenantScope((tx) =>
+      tx.user.findUnique({ where: { id: actor.userId }, select: { passwordHash: true } }),
+    );
+    if (!user) throw new LocaleHubError(ErrorCode.NOT_FOUND, 'User not found', 404);
+    if (!(await verifyPassword(body.currentPassword, user.passwordHash))) {
+      // A wrong current password is a failed authentication, not a validation error.
+      throw new LocaleHubError(ErrorCode.INVALID_TOKEN, 'Current password is incorrect', 401);
+    }
+    const passwordHash = await hashPassword(body.newPassword);
+    await this.prisma.tenant.withoutTenantScope((tx) =>
+      tx.user.update({ where: { id: actor.userId }, data: { passwordHash } }),
+    );
+    await this.audit.record({
+      organizationId: actor.organizationId,
+      actorId: actor.userId,
+      action: 'user.password_change',
+      resourceType: 'user',
+      resourceId: actor.userId,
+      metadata: {},
+    });
+    return { changed: true };
   }
 
   @Post('logout')

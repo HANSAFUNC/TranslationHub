@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { KeyRound, Plus, Save, ShieldCheck, Trash2, UserPlus, UsersRound } from 'lucide-react';
+import { Ban, KeyRound, Plus, RotateCcw, Save, ShieldCheck, Trash2, UserPlus, UsersRound } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -93,6 +93,8 @@ interface Member {
   role: string;
   isPlatformAdmin: boolean;
   lastLoginAt: string | null;
+  /** Set while the account is suspended: it keeps its roles but every credential stops working. */
+  deactivatedAt: string | null;
   joinedAt: string;
   projects: MemberProject[];
 }
@@ -227,6 +229,26 @@ function MemberRow({
     }
   }
 
+  async function toggleSuspend() {
+    const suspend = !member.deactivatedAt;
+    if (
+      suspend &&
+      !window.confirm(`暂停 ${member.email}？该账号现有的会话与 MCP Token 会立即失效，但成员关系与项目角色会保留。`)
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await patch(`/organization/members/${member.userId}/status`, { deactivated: suspend });
+      toast.success(suspend ? '账号已暂停' : '账号已恢复');
+      onChanged();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : '操作失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function resetPassword() {
     const password = window.prompt(`为 ${member.email} 设置新密码（至少 10 位）`);
     if (!password) return;
@@ -255,6 +277,11 @@ function MemberRow({
             {member.isPlatformAdmin ? (
               <Badge variant="secondary" className="text-[10px]">
                 平台管理员
+              </Badge>
+            ) : null}
+            {member.deactivatedAt ? (
+              <Badge variant="destructive" className="text-[10px]">
+                已暂停
               </Badge>
             ) : null}
           </span>
@@ -289,6 +316,15 @@ function MemberRow({
         <TableCell className="text-right align-top">
           {mayTouch ? (
             <div className="flex justify-end gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={member.deactivatedAt ? '恢复账号' : '暂停账号'}
+                onClick={toggleSuspend}
+                disabled={busy}
+              >
+                {member.deactivatedAt ? <RotateCcw /> : <Ban className="text-destructive" />}
+              </Button>
               <Button variant="ghost" size="icon" aria-label="重置密码" onClick={resetPassword} disabled={busy}>
                 <KeyRound />
               </Button>

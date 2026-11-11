@@ -30,6 +30,7 @@ const addMemberSchema = z.object({
 
 const updateRoleSchema = z.object({ role: orgRoleSchema });
 const resetPasswordSchema = z.object({ password: z.string().min(10).max(200) });
+const deactivateSchema = z.object({ deactivated: z.boolean() });
 const projectRoleSchema_ = z.object({
   role: projectRoleSchema,
   localeScope: z.array(localeTagSchema).max(50).optional(),
@@ -78,6 +79,16 @@ export class UsersController {
   }
 
   @ApiAuth({ role: 'PROJECT_MANAGER', note: '该项目上的 PROJECT_MANAGER 或组织管理员' })
+  @ApiAuth({ role: 'ORG_ADMIN', note: '暂停后该账号的所有会话与 MCP Token 立即失效；不能暂停自己或唯一所有者' })
+  @Patch(':userId/status')
+  async setStatus(
+    @Actor() actor: ActorContext,
+    @Param('userId') userId: string,
+    @Body(zodBody(deactivateSchema)) body: z.infer<typeof deactivateSchema>,
+  ) {
+    return this.users.setDeactivated(actor, userId, body.deactivated);
+  }
+
   @Put(':userId/projects/:projectId')
   async setProjectRole(
     @Actor() actor: ActorContext,

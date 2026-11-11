@@ -31,6 +31,8 @@
 | POST   | `/auth/logout`              | 登录                   | 清除会话 Cookie 与 CSRF Cookie               |
 | GET    | `/organization`             | 成员                   | 当前组织及其安全策略                         |
 | PATCH  | `/organization/settings`    | ORG_OWNER / ORG_ADMIN  | 修改组织安全策略（当前为 `allowDraftApply`） |
+| GET    | `/organization/audit`       | ORG_OWNER / ORG_ADMIN  | 组织审计日志（`?action=member.` 前缀筛选）   |
+| PATCH  | `/auth/password`            | 登录（非 MCP Token）   | 修改**自己**的密码（需提供当前密码）         |
 | GET    | `/organization/overview`    | 成员                   | 组织级统计                                   |
 
 ### 2.0 组织成员
@@ -59,6 +61,14 @@
 
 `role` 只会用于创建新账号；`PATCH` 的角色改动**不会**追溯已签发的会话 Token（角色在 Token 里），
 被改角色的人需要重新登录——这是有意的，避免一个已发出的凭据被静默提权。
+
+**暂停 vs 移出**：暂停保留成员关系、项目角色与审计记录，只是让该账号持有的**所有**凭据立即失效
+（会话与 MCP Token 都在 `AuthGuard` 里逐个请求检查）；移出则删除成员关系与项目角色。要临时切断某人
+访问用暂停，要彻底移除用移出。
+
+**登录时的组织选择**：`POST /auth/login` 接受可选 `organizationId`。不传时进入**上次使用的组织**
+（而不是之前那样取 `memberships[0]`，即数据库返回顺序）；传了但账号不属于该组织会返回 403，而不是
+静默换成另一个组织——那会让人在没要求的租户里操作。响应始终带上 `organizations` 列表，UI 据此提供切换。
 
 ### 2.1 两种凭据
 

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ErrorCode, LocaleHubError, Role } from '@localehub/contracts';
-import type { ActorContext } from '@localehub/permissions';
+import { isMemberManagerRole, type ActorContext } from '@localehub/permissions';
 import { PrismaService } from '../../common/prisma.service';
 import { AuditService } from '../../common/audit.service';
 
@@ -12,6 +12,19 @@ import { AuditService } from '../../common/audit.service';
  * repository, replacing approved copy. The delivery spec allows that path but treats it as an
  * explicit, risky opt-in, so it is off until an organization turns it on.
  */
+export interface AuditEntry {
+  id: string;
+  action: string;
+  actorType: string;
+  actor: { id: string; email: string; name: string } | null;
+  resourceType: string;
+  resourceId: string | null;
+  projectId: string | null;
+  metadata: Record<string, unknown>;
+  requestId: string | null;
+  createdAt: string;
+}
+
 @Injectable()
 export class OrganizationsService {
   constructor(
@@ -31,6 +44,53 @@ export class OrganizationsService {
       allowDraftApply: organization.allowDraftApply,
       createdAt: organization.createdAt,
     };
+  }
+
+  /**
+   * Organization-level audit trail.
+   *
+   * Member changes (create, role update, removal, suspension, password reset) were already being
+   * written to `audit_logs`, but the only reader was project-scoped, so "who promoted whom" had
+   * no answer anywhere in the product. Requires an admin: the trail names people and their roles.
+   */
+  async listAudit(
+    actor: ActorContext,
+    options: { action?: string; limit?: number } = {},
+  ): Promise<AuditEntry[]> {
+    if (!isMemberManagerRole(actor.orgRole) && !actor.isPlatformAdmin) {
+      throw new LocaleHubError(
+        ErrorCode.ROLE_INSUFFICIENT,
+        'Organization admin or owner is required to read the audit trail',
+        403,
+      );
+    }
+    const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
+    return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
+      const rows = await tx.auditLog.findMany({
+        where: options.action ? { action: { startsWith: options.action } } : {},
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      });
+      // Actor names come from an id list the RLS-scoped query above produced; `users` carries no
+      // row-level policy of its own (see UsersService for the same reasoning).
+      const actorIds = [...new Set(rows.map((row) => row.actorId).filter((id): id is string => Boolean(id)))];
+      const actors = actorIds.length
+        ? await tx.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, email: true, name: true } })
+        : [];
+      const byId = new Map(actors.map((user) => [user.id, user]));
+      return rows.map((row) => ({
+        id: row.id,
+        action: row.action,
+        actorType: row.actorType,
+        actor: row.actorId ? (byId.get(row.actorId) ?? null) : null,
+        resourceType: row.resourceType,
+        resourceId: row.resourceId,
+        projectId: row.projectId,
+        metadata: row.metadata as Record<string, unknown>,
+        requestId: row.requestId,
+        createdAt: row.createdAt.toISOString(),
+      }));
+    });
   }
 
   async updateSettings(actor: ActorContext, input: { allowDraftApply?: boolean }) {

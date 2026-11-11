@@ -112,6 +112,11 @@ export class AuthGuard implements CanActivate {
     );
     if (!client) throw new LocaleHubError(ErrorCode.INVALID_TOKEN, 'Unknown token', 401);
     if (client.revokedAt) throw new LocaleHubError(ErrorCode.INVALID_TOKEN, 'Token has been revoked', 401);
+    // Suspension is checked here rather than only at login: a token issued before the account was
+    // suspended must stop working too, or "suspend" would only take effect for new sessions.
+    if (client.user.deactivatedAt) {
+      throw new LocaleHubError(ErrorCode.ACCOUNT_DEACTIVATED, 'This account has been suspended', 403);
+    }
     if (client.expiresAt && client.expiresAt.getTime() < Date.now()) {
       throw new LocaleHubError(ErrorCode.TOKEN_EXPIRED, 'Token expired, create a new connection token', 401);
     }
@@ -155,6 +160,11 @@ export class AuthGuard implements CanActivate {
       }),
     );
     if (!user) throw new LocaleHubError(ErrorCode.INVALID_TOKEN, 'User no longer exists', 401);
+    // Interactive sessions are checked against the database on every request precisely so that
+    // changes like this take effect immediately, without waiting for a token to expire.
+    if (user.deactivatedAt) {
+      throw new LocaleHubError(ErrorCode.ACCOUNT_DEACTIVATED, 'This account has been suspended', 403);
+    }
     const requestedOrg = (request.headers['x-organization-id'] as string | undefined) ?? claims.org;
     const membership = user.memberships.find((m) => m.organizationId === requestedOrg) ?? user.memberships[0];
     if (!membership && !user.isPlatformAdmin) {

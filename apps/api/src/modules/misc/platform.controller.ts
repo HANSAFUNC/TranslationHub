@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { assertRole, type ActorContext } from '@localehub/permissions';
 import { createAdapter } from '@localehub/format-adapters';
 import { emitProjectEvent } from '@localehub/domain';
-import { Actor, Public, RequireRole, type AuthenticatedRequest } from '../../common/auth';
+import { Actor, RequireRole, type AuthenticatedRequest } from '../../common/auth';
 import { PrismaService } from '../../common/prisma.service';
 import { AuditService } from '../../common/audit.service';
 import { QueueService, QUEUE_NAMES } from '../../common/queue.service';
@@ -237,9 +237,25 @@ export class PlatformController {
     );
   }
 
-  @Public()
+  /**
+   * Queue health.
+   *
+   * Was `@Public()`: it leaked internal queue names and backlog to anyone who could reach the
+   * host. Liveness and readiness probes use `/health` and `/health/ready`, which stay public, so
+   * this can require a platform admin.
+   *
+   * The check is written out because the route carries no `projectId` — a `@RequireRole`
+   * decorator here would decide nothing (docs/STATUS.md §1.11, §1.15).
+   */
   @Get('system/queues')
-  async queues() {
+  async queues(@Actor() actor: ActorContext) {
+    if (!actor.isPlatformAdmin) {
+      throw new LocaleHubError(
+        ErrorCode.ROLE_INSUFFICIENT,
+        'Platform administrator is required to read queue health',
+        403,
+      );
+    }
     return this.queue.health();
   }
 }

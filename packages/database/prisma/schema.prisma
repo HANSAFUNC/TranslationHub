@@ -204,6 +204,13 @@ model User {
   passwordHash    String    @map("password_hash")
   isPlatformAdmin Boolean   @default(false) @map("is_platform_admin")
   lastLoginAt     DateTime? @map("last_login_at")
+  /// Remembered so a person who belongs to several organizations lands in the one they used last,
+  /// instead of whichever row the database returned first.
+  lastOrganizationId String? @map("last_organization_id") @db.Uuid
+  /// Set when an organization admin suspends the account. A suspended account keeps its
+  /// memberships and project roles — the point is to cut off access without losing the history
+  /// of who held what — but every credential it holds stops authenticating.
+  deactivatedAt   DateTime? @map("deactivated_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 

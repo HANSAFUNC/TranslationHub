@@ -27,6 +27,7 @@ export interface MemberRow {
   role: string;
   isPlatformAdmin: boolean;
   lastLoginAt: string | null;
+  deactivatedAt: string | null;
   joinedAt: string;
   projects: MemberProjectAssignment[];
 }
@@ -73,7 +74,7 @@ export class UsersService {
       // Scoped by the ids the RLS-protected membership query just returned.
       const users = await tx.user.findMany({
         where: { id: { in: userIds } },
-        select: { id: true, email: true, name: true, isPlatformAdmin: true, lastLoginAt: true },
+        select: { id: true, email: true, name: true, isPlatformAdmin: true, lastLoginAt: true, deactivatedAt: true },
       });
       const byId = new Map(users.map((user) => [user.id, user]));
 
@@ -106,6 +107,7 @@ export class UsersService {
             role: membership.role,
             isPlatformAdmin: user.isPlatformAdmin,
             lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
+            deactivatedAt: user.deactivatedAt?.toISOString() ?? null,
             joinedAt: membership.createdAt.toISOString(),
             projects: projectsByUser.get(user.id) ?? [],
           },
@@ -276,6 +278,43 @@ export class UsersService {
       metadata: {},
     });
     return { userId };
+  }
+
+  /**
+   * Suspend or restore an account.
+   *
+   * Suspension is separate from removal: the person keeps their memberships, project roles and
+   * audit trail, but every credential they hold — session cookies and MCP tokens alike — stops
+   * authenticating. `AuthGuard` checks the flag on each request, so this takes effect at once
+   * rather than when the current token happens to expire.
+   */
+  async setDeactivated(actor: ActorContext, userId: string, deactivated: boolean): Promise<{ userId: string; deactivatedAt: string | null }> {
+    assertCanManageMembers(actor);
+    if (userId === actor.userId) {
+      throw new LocaleHubError(ErrorCode.CONFLICT, 'You cannot suspend your own account', 409);
+    }
+    await this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
+      const membership = await tx.membership.findUnique({
+        where: { organizationId_userId: { organizationId: actor.organizationId, userId } },
+      });
+      if (!membership) throw new LocaleHubError(ErrorCode.NOT_FOUND, 'That user is not a member', 404);
+      assertCanManageMember(actor, membership.role as Role);
+      // Suspending the only owner would lock the organization out of member management.
+      if (deactivated) await this.assertOwnerSurvives(tx, membership.role as Role, null);
+    });
+    const deactivatedAt = deactivated ? new Date() : null;
+    await this.prisma.tenant.withoutTenantScope((tx) =>
+      tx.user.update({ where: { id: userId }, data: { deactivatedAt } }),
+    );
+    await this.audit.record({
+      organizationId: actor.organizationId,
+      actorId: actor.userId,
+      action: deactivated ? 'member.suspend' : 'member.restore',
+      resourceType: 'user',
+      resourceId: userId,
+      metadata: {},
+    });
+    return { userId, deactivatedAt: deactivatedAt?.toISOString() ?? null };
   }
 
   /**

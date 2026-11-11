@@ -3,9 +3,11 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
+import { toast } from 'sonner';
 import {
   Boxes,
   Building2,
+  Check,
   GitBranch,
   KeyRound,
   LayoutDashboard,
@@ -52,6 +54,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { href: '/projects', label: '所有项目', icon: Boxes },
       { href: '/settings/members', label: '组织成员', icon: UsersRound },
+      { href: '/settings/audit', label: '审计日志', icon: ScrollText },
       { href: '/settings/organization', label: '组织设置', icon: Building2 },
     ],
   },
@@ -127,6 +130,52 @@ function ThemeToggle() {
   );
 }
 
+/**
+ * Switch the active organization.
+ *
+ * The session token carries the organization, so switching means getting a new one from the API
+ * and reloading — every page's data is scoped to the organization it was fetched under.
+ *
+ * Only rendered when the account belongs to more than one; a single-tenant user should not see a
+ * menu that can only ever have one entry.
+ */
+function OrganizationSwitcher({ me }: { me: Me | null }) {
+  const [busy, setBusy] = useState(false);
+  const organizations = me?.organizations ?? [];
+  if (organizations.length < 2) return null;
+
+  async function switchTo(organizationId: string) {
+    if (!me || organizationId === me.organizationId) return;
+    setBusy(true);
+    try {
+      await post('/auth/switch-organization', { organizationId });
+      // Full reload: every cached page was fetched for the previous organization.
+      window.location.reload();
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : '切换失败');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">切换组织</DropdownMenuLabel>
+      {organizations.map((organization) => (
+        <DropdownMenuItem
+          key={organization.id}
+          disabled={busy || organization.id === me?.organizationId}
+          onClick={() => switchTo(organization.id)}
+        >
+          <Building2 data-icon="inline-start" />
+          <span className="flex-1 truncate">{organization.name}</span>
+          {organization.id === me?.organizationId ? <Check /> : null}
+        </DropdownMenuItem>
+      ))}
+    </>
+  );
+}
+
 function UserMenu({ me, onSignOut }: { me: Me | null; onSignOut: () => void }) {
   return (
     <DropdownMenu>
@@ -152,6 +201,13 @@ function UserMenu({ me, onSignOut }: { me: Me | null; onSignOut: () => void }) {
             组织设置
           </Link>
         </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/settings/account">
+            <KeyRound data-icon="inline-start" />
+            账号与密码
+          </Link>
+        </DropdownMenuItem>
+        <OrganizationSwitcher me={me} />
         <DropdownMenuItem
           variant="destructive"
           onClick={async () => {
