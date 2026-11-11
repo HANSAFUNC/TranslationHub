@@ -20,6 +20,7 @@ import {
   Sun,
   TriangleAlert,
   UsersRound,
+  Webhook,
   LogOut,
   Languages,
 } from 'lucide-react';
@@ -55,6 +56,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { href: '/projects', label: '所有项目', icon: Boxes },
       { href: '/settings/members', label: '组织成员', icon: UsersRound },
       { href: '/settings/audit', label: '审计日志', icon: ScrollText },
+      { href: '/settings/webhooks', label: 'Webhook', icon: Webhook },
       { href: '/settings/organization', label: '组织设置', icon: Building2 },
     ],
   },
