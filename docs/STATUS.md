@@ -258,6 +258,23 @@ path 参数、body 里的 `projectId` 也不是自己，handler 与服务层都�
 顺带审计了其余 `@RequireRole` 路由：`/organization/overview` 只返回计数、`/system/queues` 是刻意
 `@Public()` 供探针使用、`/organization/settings` 在 service 内自查角色，均无同类缺口。
 
+### 1.16 `POST /projects/:projectId/members` 可绕过全部成员守卫（本轮发现并移除）
+
+写 §1.14 的守卫时留下一条旧路没关：`POST /projects/:projectId/members` 只要求**该项目**的
+PROJECT_MANAGER，却会**代建组织成员关系**，并把传入的**项目角色当作组织角色**写进去。
+
+实测复现：一个组织角色仅 `DEVELOPER`、只在某一个项目上有 PROJECT_MANAGER 的账号，调用该接口把一个
+组织外的用户拉进组织，落库的组织角色是 `PROJECT_MANAGER`——高于他自己的组织角色，且完全绕过
+§1.14 的五条守卫（不得越级授予、不得修改高于自己的成员、必须留至少一个所有者、MCP Token 不得管理
+成员、以及「组织级成员管理需要 ORG_ADMIN」）。
+
+该接口的 `POST` 在 Web、CLI、api-client 与测试中**都没有调用方**——它是纯遗留攻击面。已删除
+（连同 `addMemberSchema` 与 `ProjectsService.addMember`），`GET` 保留（项目成员只读视图，无害）。
+项目经理想给项目配人，走 `PUT /organization/members/:userId/projects/:projectId`（有守卫）；
+要把人拉进组织，必须 ORG_ADMIN。
+
+回归测试断言该路由返回 404。至此成员相关的写入路径只剩一条。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -308,7 +325,7 @@ pnpm -r build                     # 全部 packages + apps 编译通过
 pnpm --filter @localehub/web exec next build   # 15 条路由构建成功
 pnpm -r typecheck                              # 16 个 workspace 项目全部通过
 pnpm test                                      # 125 unit tests passed
-pnpm test:integration                          # 58 integration tests passed（14 验收 + 12 安全 + 11 Skill 下发 + 21 成员管理）
+pnpm test:integration                          # 59 integration tests passed（14 验收 + 12 安全 + 11 Skill 下发 + 22 成员管理）
 node apps/e2e-demo/dist/run-demo.js            # ALL ACCEPTANCE CHECKS PASSED（A–E）
 docker compose config                          # valid
 docker compose -f compose.yaml -f compose.production.yaml config   # valid
@@ -422,6 +439,7 @@ docker build -f docker/web.Dockerfile -t localehub-web:local .
 | Web 容器用 corepack 启动 pnpm                                            | 启动时联网下载 pnpm 导致启动失败                   | 直接执行 next                                                                  |
 | Web 容器 `next start` 工作目录为 `/app`                                  | 找不到 `.next`，容器无法启动                       | 运行时 `WORKDIR /app/apps/web`                                                 |
 | `POST /projects` 的角色校验从未生效（任何成员可建项目）                  | 只读成员也能创建项目                               | service 内补 `assertRole(actor,'',PROJECT_MANAGER)` + 集成回归测试（见 §1.15） |
+| `POST /projects/:id/members` 可绕过全部成员守卫                          | 项目级 PM 能把外部用户拉进组织并给更高组织角色     | 删除该路由（无调用方），回归测试断言 404（见 §1.16）                           |
 | `LOCALEHUB_API_URL` 覆盖被静默丢弃                                       | 所有调用方都在和 config 文件里的地址通信           | 移到 `LocalSyncServices.config()`（见 §1.12）                                  |
 | 去掉 Local MCP（用户决定）                                               | 两个 MCP 意味着版本/能力无法统一管理，发现接口失真 | 删除 `apps/mcp-local`；引擎移到 `packages/local-sync`，由 CLI 驱动             |
 | `/mcp/tools` 声明了 6 条未实现的 resource 与 1 个已删除 Server 的 prompt | 发现接口高估能力                                   | 资源/prompt 清单进契约，集成测试断言「声明 == 实际注册」                       |

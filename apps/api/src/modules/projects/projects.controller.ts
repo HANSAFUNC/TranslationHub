@@ -24,12 +24,6 @@ const updateProjectSchema = z.object({
 
 const addLocaleSchema = z.object({ code: localeTagSchema, name: z.string().max(80).optional() });
 
-const addMemberSchema = z.object({
-  email: z.string().email(),
-  role: z.enum(['PROJECT_MANAGER', 'DEVELOPER', 'PRODUCT_MANAGER', 'TRANSLATOR', 'REVIEWER', 'READONLY']),
-  localeScope: z.array(localeTagSchema).optional(),
-});
-
 @Controller('projects')
 export class ProjectsController {
   constructor(private readonly projects: ProjectsService) {}
@@ -94,16 +88,6 @@ export class ProjectsController {
     return this.projects.listMembers(actor, projectId);
   }
 
-  @Post(':projectId/members')
-  @RequireRole(Role.PROJECT_MANAGER)
-  async addMember(
-    @Actor() actor: ActorContext,
-    @Param('projectId') projectId: string,
-    @Body(zodBody(addMemberSchema)) body: z.infer<typeof addMemberSchema>,
-  ) {
-    return this.projects.addMember(actor, projectId, body);
-  }
-
   @Get(':projectId/platforms')
   async platforms(@Actor() actor: ActorContext, @Param('projectId') projectId: string) {
     const project = await this.projects.get(actor, projectId);
@@ -121,5 +105,4 @@ export class ProjectsController {
   }
 }
 
-export { createProjectSchema, updateProjectSchema, addLocaleSchema, addMemberSchema };
-
+export { createProjectSchema, updateProjectSchema, addLocaleSchema };

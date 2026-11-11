@@ -11,7 +11,10 @@ export class ProjectsService {
   async list(actor: ActorContext) {
     return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
       const projects = await tx.project.findMany({
-        where: actor.isPlatformAdmin || actor.kind === 'user' ? {} : { id: { in: actor.boundProjectIds?.length ? actor.boundProjectIds : undefined } },
+        where:
+          actor.isPlatformAdmin || actor.kind === 'user'
+            ? {}
+            : { id: { in: actor.boundProjectIds?.length ? actor.boundProjectIds : undefined } },
         orderBy: { createdAt: 'asc' },
         include: { _count: { select: { keys: true, locales: true, entries: true } } },
       });
@@ -31,7 +34,15 @@ export class ProjectsService {
 
   async create(
     actor: ActorContext,
-    input: { name: string; slug?: string; description?: string; sourceLocale: string; defaultPlatform?: string; locales?: string[]; platforms?: string[] },
+    input: {
+      name: string;
+      slug?: string;
+      description?: string;
+      sourceLocale: string;
+      defaultPlatform?: string;
+      locales?: string[];
+      platforms?: string[];
+    },
   ) {
     // Creating a project carries no `:projectId`, so the guard's `@RequireRole(PROJECT_MANAGER)` on
     // this route decides nothing on its own — the guard only applies that decorator when the
@@ -96,7 +107,11 @@ export class ProjectsService {
     });
   }
 
-  async update(actor: ActorContext, projectId: string, input: { name?: string; description?: string | null; defaultPlatform?: string; aiPolicy?: unknown }) {
+  async update(
+    actor: ActorContext,
+    projectId: string,
+    input: { name?: string; description?: string | null; defaultPlatform?: string; aiPolicy?: unknown },
+  ) {
     assertRole(actor, projectId, Role.PROJECT_MANAGER);
     return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
       const project = await tx.project.update({
@@ -182,33 +197,6 @@ export class ProjectsService {
     );
   }
 
-  async addMember(actor: ActorContext, projectId: string, input: { email: string; role: string; localeScope?: string[] }) {
-    assertRole(actor, projectId, Role.PROJECT_MANAGER);
-    return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
-      const user = await tx.user.findUnique({ where: { email: input.email.toLowerCase() } });
-      if (!user) throw new LocaleHubError(ErrorCode.NOT_FOUND, `No user with email ${input.email}`, 404);
-      const membership = await tx.membership.findUnique({
-        where: { organizationId_userId: { organizationId: actor.organizationId, userId: user.id } },
-      });
-      if (!membership) {
-        await tx.membership.create({
-          data: { organizationId: actor.organizationId, userId: user.id, role: (input.role as never) ?? 'READONLY' },
-        });
-      }
-      return tx.projectMember.upsert({
-        where: { projectId_userId: { projectId, userId: user.id } },
-        create: {
-          organizationId: actor.organizationId,
-          projectId,
-          userId: user.id,
-          role: input.role as never,
-          localeScope: input.localeScope ?? [],
-        },
-        update: { role: input.role as never, localeScope: input.localeScope ?? [] },
-      });
-    });
-  }
-
   async addPlatformSafe(actor: ActorContext, projectId: string, platform: string) {
     assertRole(actor, projectId, Role.PROJECT_MANAGER);
     return this.prisma.tenant.withOrganization(actor.organizationId, (tx) =>
@@ -244,11 +232,13 @@ export class ProjectsService {
 }
 
 export function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[^\w\s-]/g, '')
-    .trim()
-    .replace(/[\s_]+/g, '-')
-    .slice(0, 60) || `project-${Date.now().toString(36)}`;
+  return (
+    value
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^\w\s-]/g, '')
+      .trim()
+      .replace(/[\s_]+/g, '-')
+      .slice(0, 60) || `project-${Date.now().toString(36)}`
+  );
 }

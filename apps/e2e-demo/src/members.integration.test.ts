@@ -383,6 +383,21 @@ describe('project roles', () => {
     expect(response.body.error?.details).toMatchObject({ unknown: ['de-DE'] });
   });
 
+  it('offers no second path that could add an organization member', async () => {
+    // `POST /projects/:projectId/members` used to do this: it required only PROJECT_MANAGER on the
+    // project, then created the organization membership itself with the *project* role as the org
+    // role. A user whose organization role was DEVELOPER, holding PROJECT_MANAGER on one project,
+    // could therefore pull an outsider into the organization as a PROJECT_MANAGER — above their
+    // own organization role, and past every guard in §1.14. Reproduced against the running API
+    // before removal; this asserts the route is gone.
+    const response = await call(`/projects/${projectId}/members`, {
+      method: 'POST',
+      token: owner.token,
+      body: { email: `route-probe-${runId}@localehub.dev`, role: 'PROJECT_MANAGER' },
+    });
+    expect(response.status).toBe(404);
+  });
+
   it('refuses an organization role as a project role', async () => {
     const response = await call(`/organization/members/${targetUserId}/projects/${projectId}`, {
       method: 'PUT',
