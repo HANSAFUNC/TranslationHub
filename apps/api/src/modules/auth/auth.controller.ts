@@ -51,7 +51,9 @@ export class AuthController {
     @Body(zodBody(registerSchema)) body: z.infer<typeof registerSchema>,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const userCount = await this.prisma.user.count();
+    // Privileged: counting users is how "is this instance empty?" is answered, before any
+    // organization exists to scope the query to.
+    const userCount = await this.prisma.tenant.withoutTenantScope((tx) => tx.user.count());
     if (userCount > 0) {
       throw new LocaleHubError(
         ErrorCode.ROLE_INSUFFICIENT,
@@ -126,10 +128,14 @@ export class AuthController {
     if (!membership) {
       throw new LocaleHubError(ErrorCode.ORGANIZATION_ACCESS_DENIED, 'User has no organization membership', 403);
     }
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date(), lastOrganizationId: membership.organizationId },
-    });
+    // Privileged, like the read above: the session's organization is not yet in the database
+    // context when login runs, and the row being written is the one just authenticated.
+    await this.prisma.tenant.withoutTenantScope((tx) =>
+      tx.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date(), lastOrganizationId: membership.organizationId },
+      }),
+    );
     const token = issueSessionToken({
       sub: user.id,
       org: membership.organizationId,
@@ -184,7 +190,9 @@ export class AuthController {
     if (!membership) {
       throw new LocaleHubError(ErrorCode.ORGANIZATION_ACCESS_DENIED, 'You are not a member of that organization', 403);
     }
-    await this.prisma.user.update({ where: { id: actor.userId }, data: { lastOrganizationId: body.organizationId } });
+    await this.prisma.tenant.withoutTenantScope((tx) =>
+      tx.user.update({ where: { id: actor.userId }, data: { lastOrganizationId: body.organizationId } }),
+    );
     const token = issueSessionToken({
       sub: membership.userId,
       org: body.organizationId,
