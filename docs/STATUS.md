@@ -520,7 +520,15 @@ docker compose build api worker mcp-remote web && docker compose up -d --force-r
 成「你得先想办法找到它」。
 
 验证：无头 Chrome 实测教程页为默认标签、四个步骤渲染、页面出现真实 project_id、提示词带
-`project_id=`、无报错无溢出；项目详情页显示并可复制 id。
+`project_id=`、无报错无溢出；项目详情页显示并可复制 id。另有一个端到端脚本按教程四步真实走一遍
+（`scripts/check-mcp-onboarding.mjs`）：签一个只绑定单个项目的 Token，经真实 MCP 传输调用
+`list_projects`——**只返回那一个项目**，再用该 id 调 `list_project_locales` 成功。
+
+**运行期间的一次磁盘事故**：重建镜像把 Docker 磁盘占满，Postgres 因
+`could not write lock file "postmaster.pid": No space left on device` 反复重启，API 报
+`Can't reach database server at postgres:5432`。`docker builder prune -af && docker image prune -af`
+回收 21.77 GB 后自行恢复，无需重建数据。这一条与 §1.10 的「只在容器里出现的缺陷」同类：
+**症状指向数据库，原因在磁盘**。
 
 ## 2. 未实现 / 部分实现
 
