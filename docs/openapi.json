@@ -2413,6 +2413,25 @@
                   "aiPolicy": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "platforms": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "web",
+                        "ios",
+                        "android",
+                        "universal"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 4
+                  },
+                  "sourceLocale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
                   }
                 },
                 "additionalProperties": false,
@@ -3410,6 +3429,71 @@
         }
       }
     },
+    "/projects/{projectId}/locales/{code}": {
+      "delete": {
+        "operationId": "Projects_removeLocale",
+        "tags": [
+          "项目"
+        ],
+        "summary": "DELETE /projects/{projectId}/locales/{code}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/projects/{projectId}/members": {
       "get": {
         "operationId": "Projects_members",
@@ -3603,6 +3687,71 @@
             }
           }
         }
+      }
+    },
+    "/projects/{projectId}/platforms/{platform}": {
+      "delete": {
+        "operationId": "Projects_removePlatform",
+        "tags": [
+          "项目"
+        ],
+        "summary": "DELETE /projects/{projectId}/platforms/{platform}",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Envelope with `data`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED"
+          },
+          "403": {
+            "description": "ROLE_INSUFFICIENT / SCOPE_INSUFFICIENT / PROJECT_ACCESS_DENIED"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR"
+          }
+        },
+        "x-localehub-auth": {
+          "public": false,
+          "role": "PROJECT_MANAGER",
+          "scopes": [],
+          "enforcedBy": "guard"
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "platform",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/projects/{projectId}/qa/issues": {

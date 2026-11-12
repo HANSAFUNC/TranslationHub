@@ -2,20 +2,28 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Copy, GitBranch, Languages, MonitorSmartphone, Plug, Users } from 'lucide-react';
+import { useState } from 'react';
+import { Copy, GitBranch, Languages, MonitorSmartphone, Plug, Settings2, Trash2, Users } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Spinner } from '@/components/ui/spinner';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
+import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from '@/components/ui/field';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorAlert } from '@/components/error-alert';
+import { LocalePicker } from '@/components/locale-picker';
 import { PageHeader } from '@/components/page-header';
+import { PlatformPicker } from '@/components/platform-picker';
 import { StatCard } from '@/components/stat-card';
 import { StatusBadge } from '@/components/status-badge';
 import { timeAgo, useAsync } from '@/components/use-async';
-import { get } from '@/lib/api';
+import { del, get, patch, post } from '@/lib/api';
+import { localeDisplayName } from '@localehub/contracts/locale';
 import { toast } from 'sonner';
 
 interface ProjectDetail {
@@ -37,6 +45,13 @@ interface ProjectDetail {
   }[];
 }
 
+interface SettingsForm {
+  name: string;
+  description: string;
+  platforms: string[];
+  sourceLocale: string;
+}
+
 interface ProjectDashboard {
   keys: number;
   entries: number;
@@ -49,8 +64,85 @@ interface ProjectDashboard {
 export default function ProjectPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
-  const { data: project, error, loading } = useAsync(() => get<ProjectDetail>(`/projects/${projectId}`), [projectId]);
-  const { data: dashboard } = useAsync(() => get<ProjectDashboard>(`/projects/${projectId}/dashboard`), [projectId]);
+  const { data: project, error, loading, reload } = useAsync(() => get<ProjectDetail>(`/projects/${projectId}`), [projectId]);
+  const { data: dashboard, reload: reloadDashboard } = useAsync(
+    () => get<ProjectDashboard>(`/projects/${projectId}/dashboard`),
+    [projectId],
+  );
+
+  const [busy, setBusy] = useState<string | null>(null);
+  const [localeError, setLocaleError] = useState<unknown>(null);
+  const [settingsError, setSettingsError] = useState<unknown>(null);
+  const [pendingLocale, setPendingLocale] = useState('');
+  const [settings, setSettings] = useState<SettingsForm | null>(null);
+
+  const hasEntries = (dashboard?.entries ?? 0) > 0;
+  const fromProject: SettingsForm | null = project
+    ? {
+        name: project.name,
+        description: project.description ?? '',
+        platforms: project.platforms.map((row) => row.platform),
+        sourceLocale: project.sourceLocale,
+      }
+    : null;
+  const current: SettingsForm = settings ?? fromProject ?? { name: '', description: '', platforms: ['web'], sourceLocale: '' };
+
+  function resetSettings() {
+    setSettings(null);
+    setSettingsError(null);
+  }
+
+  async function saveSettings() {
+    setBusy('settings');
+    setSettingsError(null);
+    try {
+      await patch(`/projects/${projectId}`, {
+        name: current.name,
+        description: current.description || null,
+        platforms: current.platforms,
+        // Only sent when the project is still empty; the API refuses it otherwise, and sending it
+        // anyway would turn a read-only field into a failed save.
+        ...(hasEntries ? {} : { sourceLocale: current.sourceLocale }),
+      });
+      toast.success('项目设置已保存');
+      setSettings(null);
+      await Promise.all([reload(), reloadDashboard()]);
+    } catch (err) {
+      setSettingsError(err);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function addLocale() {
+    if (!pendingLocale) return;
+    setBusy('add');
+    setLocaleError(null);
+    try {
+      await post(`/projects/${projectId}/locales`, { code: pendingLocale });
+      toast.success(`已添加 ${pendingLocale}`);
+      setPendingLocale('');
+      await Promise.all([reload(), reloadDashboard()]);
+    } catch (err) {
+      setLocaleError(err);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeLocale(code: string) {
+    setBusy(code);
+    setLocaleError(null);
+    try {
+      await del(`/projects/${projectId}/locales/${encodeURIComponent(code)}`);
+      toast.success(`已移除 ${code}`);
+      await Promise.all([reload(), reloadDashboard()]);
+    } catch (err) {
+      setLocaleError(err);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -75,7 +167,8 @@ export default function ProjectPage() {
           // look at the URL, which is a poor answer to "what do I put in project_id".
           <span className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs">
-              {project?.sourceLocale} · revision {project?.revision ?? 0} · {project?.platforms.map((p) => p.platform).join(', ')}
+              {project?.sourceLocale ? localeDisplayName(project.sourceLocale) : ''} · revision {project?.revision ?? 0} ·{' '}
+              {project?.platforms.map((p) => p.platform).join(', ')}
             </span>
             <button
               type="button"
@@ -128,15 +221,18 @@ export default function ProjectPage() {
               <Languages className="size-4" />
               语言配置
             </CardTitle>
-            <CardDescription>源语言同时也是一个 Translation Entry，用 isSource 区分</CardDescription>
+            <CardDescription>
+              源语言是原文语言，其余都是目标语言。仓库里出现项目没有的语言时，导入会自动补上。
+            </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-col gap-4">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Locale</TableHead>
                   <TableHead>名称</TableHead>
                   <TableHead className="text-right">类型</TableHead>
+                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -145,15 +241,110 @@ export default function ProjectPage() {
                     <TableCell className="font-mono text-xs">{locale.code}</TableCell>
                     <TableCell>{locale.name}</TableCell>
                     <TableCell className="text-right">
-                      <StatusBadge
-                        status={locale.isSource ? 'APPROVED' : 'PENDING'}
-                        className={locale.isSource ? '' : 'opacity-70'}
-                      />
+                      <StatusBadge status={locale.isSource ? 'APPROVED' : 'PENDING'} className={locale.isSource ? '' : 'opacity-70'} />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {locale.isSource ? null : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`移除 ${locale.code}`}
+                          disabled={busy === locale.code}
+                          onClick={() => removeLocale(locale.code)}
+                        >
+                          {busy === locale.code ? <Spinner /> : <Trash2 />}
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+
+            <ErrorAlert error={localeError} onDismiss={() => setLocaleError(null)} />
+
+            <Separator />
+
+            <div className="flex flex-col gap-3">
+              <Field>
+                <FieldLabel>添加语言</FieldLabel>
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <LocalePicker
+                      value={pendingLocale}
+                      onChange={setPendingLocale}
+                      exclude={project?.locales.map((locale) => locale.code) ?? []}
+                      placeholder="选择要添加的语言"
+                    />
+                  </div>
+                  <Button type="button" disabled={!pendingLocale || busy === 'add'} onClick={addLocale}>
+                    {busy === 'add' ? <Spinner data-icon="inline-start" /> : null}
+                    添加
+                  </Button>
+                </div>
+                <FieldDescription>
+                  语言代码一旦有译文就不再改动。已存在同一语言时（例如已有 zh-CN 再添加 zh-Hans）会被拒绝，避免译文被拆到两个语言下。
+                </FieldDescription>
+              </Field>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Settings2 className="size-4" />
+              项目设置
+            </CardTitle>
+            <CardDescription>名称、描述与平台。平台决定 Key 的身份，改动会影响之后的同步</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ErrorAlert error={settingsError} onDismiss={() => setSettingsError(null)} />
+            <FieldSet>
+              <FieldGroup className="gap-4">
+                <Field>
+                  <FieldLabel htmlFor="project-name">项目名称</FieldLabel>
+                  <Input id="project-name" value={current.name} onChange={(event) => setSettings({ ...current, name: event.target.value })} />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="project-description">描述</FieldLabel>
+                  <Textarea
+                    id="project-description"
+                    rows={2}
+                    value={current.description}
+                    onChange={(event) => setSettings({ ...current, description: event.target.value })}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel>平台</FieldLabel>
+                  <PlatformPicker value={current.platforms} onChange={(platforms) => setSettings({ ...current, platforms })} />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="project-source">源语言</FieldLabel>
+                  <LocalePicker
+                    id="project-source"
+                    value={current.sourceLocale}
+                    onChange={(sourceLocale) => setSettings({ ...current, sourceLocale })}
+                    exclude={project?.locales.filter((locale) => !locale.isSource).map((locale) => locale.code) ?? []}
+                    disabled={hasEntries}
+                  />
+                  <FieldDescription>
+                    {hasEntries
+                      ? `项目已有 ${dashboard?.entries ?? 0} 条译文，源语言是它们的依据，不能再改。`
+                      : '还没有译文，可以改。一旦导入或推送了内容就固定。'}
+                  </FieldDescription>
+                </Field>
+                <Field orientation="horizontal">
+                  <Button type="button" disabled={busy === 'settings' || !current.name} onClick={saveSettings}>
+                    {busy === 'settings' ? <Spinner data-icon="inline-start" /> : null}
+                    保存
+                  </Button>
+                  <Button type="button" variant="outline" onClick={resetSettings} disabled={busy === 'settings'}>
+                    还原
+                  </Button>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
           </CardContent>
         </Card>
 

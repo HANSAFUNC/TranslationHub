@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ErrorCode, LocaleHubError, Role, canonicalizeLocaleTag, isValidLocaleTag } from '@localehub/contracts';
+import { ErrorCode, LocaleHubError, Role, canonicalizeLocaleTag, isValidLocaleTag, localeDisplayName, resolveLocaleTag } from '@localehub/contracts';
 import { assertRole, type ActorContext } from '@localehub/permissions';
 import { createProject, emitProjectEvent, slugify } from '@localehub/domain';
 import { PrismaService } from '../../common/prisma.service';
@@ -89,10 +89,89 @@ export class ProjectsService {
   async update(
     actor: ActorContext,
     projectId: string,
-    input: { name?: string; description?: string | null; defaultPlatform?: string; aiPolicy?: unknown },
+    input: {
+      name?: string;
+      description?: string | null;
+      defaultPlatform?: string;
+      aiPolicy?: unknown;
+      platforms?: string[];
+      sourceLocale?: string;
+    },
   ) {
     assertRole(actor, projectId, Role.PROJECT_MANAGER);
     return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
+      const current = await tx.project.findUniqueOrThrow({
+        where: { id: projectId },
+        select: { sourceLocale: true },
+      });
+
+      if (input.sourceLocale !== undefined) {
+        const sourceLocale = canonicalizeLocaleTag(input.sourceLocale);
+        if (!isValidLocaleTag(sourceLocale)) {
+          throw new LocaleHubError(ErrorCode.INVALID_LOCALE, `Invalid source locale: ${input.sourceLocale}`, 422);
+        }
+        if (sourceLocale !== current.sourceLocale) {
+          // Everything the project knows is anchored to the source: source versions, the "stale"
+          // marker on derived translations, the three-way baseline. Re-pointing it after text
+          // exists would leave every one of those describing a language that is no longer there.
+          const entries = await tx.translationEntry.count({ where: { projectId } });
+          if (entries > 0) {
+            throw new LocaleHubError(
+              ErrorCode.CONFLICT,
+              `This project already has ${entries} translation(s). The source locale is what they were derived from and cannot be changed now.`,
+              409,
+              { entries },
+            );
+          }
+          const [existingSource, target] = await Promise.all([
+            tx.locale.findUnique({ where: { projectId_code: { projectId, code: current.sourceLocale } } }),
+            tx.locale.findUnique({ where: { projectId_code: { projectId, code: sourceLocale } } }),
+          ]);
+          if (target) {
+            // The new source was already a translation language — a swap, not an addition. Both
+            // rows stay; only which one is the source changes.
+            await tx.locale.update({ where: { id: target.id }, data: { isSource: true } });
+            if (existingSource) await tx.locale.update({ where: { id: existingSource.id }, data: { isSource: false } });
+          } else if (existingSource) {
+            // Rename in place when the old source has no other role; otherwise it becomes a plain
+            // language and the new one takes over as source.
+            await tx.locale.update({ where: { id: existingSource.id }, data: { code: sourceLocale, name: localeDisplayName(sourceLocale), isSource: true } });
+          } else {
+            await tx.locale.create({
+              data: {
+                organizationId: actor.organizationId,
+                projectId,
+                code: sourceLocale,
+                name: localeDisplayName(sourceLocale),
+                isSource: true,
+              },
+            });
+          }
+        }
+      }
+
+      if (input.platforms) {
+        // A set, sent whole: the form is one save, and a platform removed there is removed here.
+        const wanted = new Set(input.platforms);
+        const existing = await tx.projectPlatform.findMany({ where: { projectId }, select: { platform: true } });
+        for (const row of existing) {
+          if (!wanted.has(row.platform)) {
+            await tx.projectPlatform.delete({ where: { projectId_platform: { projectId, platform: row.platform } } });
+          }
+        }
+        for (const platform of wanted) {
+          await tx.projectPlatform.upsert({
+            where: { projectId_platform: { projectId, platform: platform as never } },
+            create: { organizationId: actor.organizationId, projectId, platform: platform as never },
+            update: {},
+          });
+        }
+        if (!wanted.has((input.defaultPlatform ?? '') as string)) {
+          // The default platform is a pointer into the set; leaving it dangling breaks new keys.
+          input = { ...input, defaultPlatform: [...wanted][0] };
+        }
+      }
+
       const project = await tx.project.update({
         where: { id: projectId },
         data: {
@@ -100,6 +179,7 @@ export class ProjectsService {
           ...(input.description !== undefined ? { description: input.description } : {}),
           ...(input.defaultPlatform ? { defaultPlatform: input.defaultPlatform as never } : {}),
           ...(input.aiPolicy !== undefined ? { aiPolicy: input.aiPolicy as never } : {}),
+          ...(input.sourceLocale ? { sourceLocale: canonicalizeLocaleTag(input.sourceLocale) } : {}),
         },
       });
       await emitProjectEvent(tx, {
@@ -152,17 +232,62 @@ export class ProjectsService {
     const code = canonicalizeLocaleTag(input.code);
     return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
       const project = await tx.project.findUniqueOrThrow({ where: { id: projectId }, select: { sourceLocale: true } });
-      return tx.locale.upsert({
-        where: { projectId_code: { projectId, code } },
-        create: {
+      // A second spelling of a language the project already has would split its entries: `zh-Hans`
+      // and `zh-CN` are one language, and the import path already treats them that way.
+      const existing = await tx.locale.findMany({ where: { projectId }, select: { code: true } });
+      const resolution = resolveLocaleTag(code, existing.map((row) => row.code));
+      if (resolution.reason === 'ambiguous') {
+        throw new LocaleHubError(
+          ErrorCode.INVALID_LOCALE,
+          `Cannot tell which language "${code}" means: this project already has ${resolution.candidates!.join(' and ')}.`,
+          409,
+          { incoming: code, candidates: resolution.candidates },
+        );
+      }
+      if (resolution.reason === 'equivalent') {
+        throw new LocaleHubError(
+          ErrorCode.CONFLICT,
+          `This project already has ${resolution.code}, which means the same language as ${code}.`,
+          409,
+          { requested: code, existing: resolution.code },
+        );
+      }
+      return tx.locale.create({
+        data: {
           organizationId: actor.organizationId,
           projectId,
           code,
-          name: input.name ?? code,
+          name: input.name ?? localeDisplayName(code),
           isSource: code === project.sourceLocale,
         },
-        update: { name: input.name ?? code },
       });
+    });
+  }
+
+  async removeLocale(actor: ActorContext, projectId: string, code: string) {
+    assertRole(actor, projectId, Role.PROJECT_MANAGER);
+    return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
+      const project = await tx.project.findUniqueOrThrow({ where: { id: projectId }, select: { sourceLocale: true } });
+      if (canonicalizeLocaleTag(code) === project.sourceLocale) {
+        throw new LocaleHubError(
+          ErrorCode.VALIDATION_ERROR,
+          'The source locale cannot be removed; it is what every other translation is based on.',
+          409,
+        );
+      }
+      const entries = await tx.translationEntry.count({ where: { projectId, localeCode: code } });
+      if (entries > 0) {
+        // Deleting the locale would cascade the translations away. That is a decision for a person
+        // with the numbers in front of them, not a side effect of tidying a list.
+        throw new LocaleHubError(
+          ErrorCode.CONFLICT,
+          `${entries} translation(s) exist for ${code}. Delete them first, or keep the locale.`,
+          409,
+          { locale: code, entries },
+        );
+      }
+      await tx.locale.delete({ where: { projectId_code: { projectId, code } } });
+      return { removed: code };
     });
   }
 
@@ -174,6 +299,28 @@ export class ProjectsService {
         include: { user: { select: { id: true, email: true, name: true } } },
       }),
     );
+  }
+
+  async removePlatformSafe(actor: ActorContext, projectId: string, platform: string) {
+    assertRole(actor, projectId, Role.PROJECT_MANAGER);
+    return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
+      const remaining = await tx.projectPlatform.count({ where: { projectId } });
+      if (remaining <= 1) {
+        throw new LocaleHubError(ErrorCode.CONFLICT, 'A project needs at least one platform.', 409);
+      }
+      const keys = await tx.translationKey.count({ where: { projectId, platform: platform as never } });
+      if (keys > 0) {
+        // Keys are scoped by platform; removing it would hide them rather than delete them.
+        throw new LocaleHubError(
+          ErrorCode.CONFLICT,
+          `${keys} key(s) exist on ${platform}. Archive them first, or keep the platform.`,
+          409,
+          { platform, keys },
+        );
+      }
+      await tx.projectPlatform.delete({ where: { projectId_platform: { projectId, platform: platform as never } } });
+      return { removed: platform };
+    });
   }
 
   async addPlatformSafe(actor: ActorContext, projectId: string, platform: string) {

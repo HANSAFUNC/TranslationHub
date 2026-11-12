@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -18,8 +18,20 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { useAsync } from '@/components/use-async';
 import { get, post, type ProjectSummary } from '@/lib/api';
+import { LocalePicker } from '@/components/locale-picker';
+import { LocaleChips } from '@/components/locale-chips';
+import { PlatformPicker } from '@/components/platform-picker';
 
-const EMPTY_FORM = { name: '', slug: '', sourceLocale: 'en-US', locales: 'ja-JP,zh-CN' };
+const EMPTY_FORM = {
+  name: '',
+  slug: '',
+  // Empty rather than a guess: the source language is the one decision that cannot be taken back
+  // once translations exist, so it is chosen deliberately instead of being pre-filled with
+  // whatever the last project used.
+  sourceLocale: '',
+  locales: [] as string[],
+  platforms: ['web'] as string[],
+};
 
 export default function ProjectsPage() {
   const { data, error, loading, reload } = useAsync(() => get<ProjectSummary[]>('/projects'), []);
@@ -37,10 +49,8 @@ export default function ProjectsPage() {
         name: form.name,
         ...(form.slug ? { slug: form.slug } : {}),
         sourceLocale: form.sourceLocale,
-        locales: form.locales
-          .split(',')
-          .map((locale) => locale.trim())
-          .filter(Boolean),
+        locales: form.locales,
+        platforms: form.platforms,
       });
       toast.success(`项目「${form.name}」已创建`);
       setForm(EMPTY_FORM);
@@ -98,26 +108,56 @@ export default function ProjectsPage() {
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="sourceLocale">源语言（BCP 47）</FieldLabel>
-                  <Input
+                  <FieldLabel htmlFor="sourceLocale">源语言</FieldLabel>
+                  <LocalePicker
                     id="sourceLocale"
-                    className="font-mono"
                     value={form.sourceLocale}
-                    onChange={(event) => setForm({ ...form, sourceLocale: event.target.value })}
-                    required
+                    onChange={(sourceLocale) =>
+                      setForm({
+                        ...form,
+                        sourceLocale,
+                        // The source is not also a target; the platform stores it as a locale too,
+                        // but listing it twice in the form reads like a mistake.
+                        locales: form.locales.filter((code) => code !== sourceLocale),
+                      })
+                    }
+                    placeholder="选择原文语言"
                   />
+                  <FieldDescription>
+                    原文语言。创建后一旦有译文就无法再改，所以先确认仓库里的源语言目录叫什么。
+                  </FieldDescription>
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="locales">目标语言（逗号分隔）</FieldLabel>
-                  <Input
+                  <FieldLabel htmlFor="locales">目标语言</FieldLabel>
+                  <LocalePicker
                     id="locales"
-                    className="font-mono"
+                    multiple
                     value={form.locales}
-                    onChange={(event) => setForm({ ...form, locales: event.target.value })}
+                    onChange={(locales) => setForm({ ...form, locales })}
+                    exclude={form.sourceLocale ? [form.sourceLocale] : []}
+                    placeholder="添加目标语言"
                   />
+                  <FieldDescription>可以稍后在项目设置里增删。</FieldDescription>
                 </Field>
+                <Field className="sm:col-span-2">
+                  <FieldLabel>平台</FieldLabel>
+                  <PlatformPicker value={form.platforms} onChange={(platforms) => setForm({ ...form, platforms })} />
+                  <FieldDescription>
+                    决定 Key 的身份。要与仓库里语言文件映射的 platform 一致，之后改动需要重导。
+                  </FieldDescription>
+                </Field>
+                {form.locales.length ? (
+                  <Field className="sm:col-span-2">
+                    <FieldLabel>将创建的语言</FieldLabel>
+                    <LocaleChips
+                      codes={[form.sourceLocale, ...form.locales].filter(Boolean)}
+                      source={form.sourceLocale}
+                      onRemove={(code) => setForm({ ...form, locales: form.locales.filter((item) => item !== code) })}
+                    />
+                  </Field>
+                ) : null}
                 <Field orientation="horizontal" className="sm:col-span-2">
-                  <Button type="submit" disabled={busy || !form.name}>
+                  <Button type="submit" disabled={busy || !form.name || !form.sourceLocale}>
                     {busy ? <Spinner data-icon="inline-start" /> : null}
                     创建
                   </Button>

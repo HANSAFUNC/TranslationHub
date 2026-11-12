@@ -14,5 +14,19 @@
   },
   "devDependencies": {
     "typescript": "^5.7.2"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./locale": {
+      "types": "./dist/locale.d.ts",
+      "default": "./dist/locale.js"
+    },
+    "./locale-catalog": {
+      "types": "./dist/locale-catalog.d.ts",
+      "default": "./dist/locale-catalog.js"
+    }
   }
 }

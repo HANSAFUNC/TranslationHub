@@ -21,6 +21,16 @@ const updateProjectSchema = z.object({
   description: z.string().max(2000).nullable().optional(),
   defaultPlatform: platformSchema.optional(),
   aiPolicy: z.record(z.unknown()).optional(),
+  /**
+   * The project's platforms, as a set. Sent whole rather than added one at a time so the settings
+   * form is one save rather than a request per checkbox.
+   */
+  platforms: z.array(platformSchema).min(1).max(4).optional(),
+  /**
+   * The source language. Only accepted while the project holds no translation entries — after that
+   * it is what every source version and every stale marker is anchored to.
+   */
+  sourceLocale: localeTagSchema.optional(),
 });
 
 const addLocaleSchema = z.object({ code: localeTagSchema, name: z.string().max(80).optional() });
@@ -75,6 +85,16 @@ export class ProjectsController {
     return this.projects.listLocales(actor, projectId);
   }
 
+  @Delete(':projectId/locales/:code')
+  @RequireRole(Role.PROJECT_MANAGER)
+  async removeLocale(
+    @Actor() actor: ActorContext,
+    @Param('projectId') projectId: string,
+    @Param('code') code: string,
+  ) {
+    return this.projects.removeLocale(actor, projectId, code);
+  }
+
   @Post(':projectId/locales')
   @RequireRole(Role.PROJECT_MANAGER)
   async addLocale(
@@ -104,6 +124,16 @@ export class ProjectsController {
     @Body(zodBody(z.object({ platform: platformSchema }))) body: { platform: string },
   ) {
     return this.projects.addPlatformSafe(actor, projectId, body.platform);
+  }
+
+  @Delete(':projectId/platforms/:platform')
+  @RequireRole(Role.PROJECT_MANAGER)
+  async removePlatform(
+    @Actor() actor: ActorContext,
+    @Param('projectId') projectId: string,
+    @Param('platform') platform: string,
+  ) {
+    return this.projects.removePlatformSafe(actor, projectId, platform);
   }
 }
 

@@ -1,3 +1,5 @@
+import { findCatalogLocale, localeLabel } from './locale-catalog';
+
 /**
  * BCP-47 style language tag handling (spec §4.2 requires locale codes to be valid BCP 47).
  * We intentionally implement a pragmatic validator instead of pulling a full CLDR database:
@@ -143,6 +145,10 @@ const REGION_NAMES: Record<string, string> = {
  */
 export function localeDisplayName(tag: string): string {
   const code = canonicalizeLocaleTag(tag);
+  // The catalog knows the names people expect ("中文（简体）", "Português (Brasil)"); the fallback
+  // below covers everything else without pretending to a full CLDR table.
+  const catalog = findCatalogLocale(code) ?? findCatalogLocale(code.toLowerCase());
+  if (catalog) return localeLabel(catalog);
   const parts = code.split('-');
   const language = parts[0] ?? '';
   const pieces = [LANGUAGE_NAMES[language] ?? code];

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { REMOTE_MCP_TOOL_SCOPES, REMOTE_MCP_TOOLS, remoteToolSchemas } from '../mcp-tools';
 import { localeDisplayName, resolveLocaleTag } from '../locale';
+import { COMMON_LOCALES, localeLabel } from '../locale-catalog';
 import { ALL_MCP_SCOPES } from '../roles';
 
 /**
@@ -105,11 +106,24 @@ describe('resolveLocaleTag', () => {
 
 describe('localeDisplayName', () => {
   it('names the languages a project is likely to grow', () => {
-    expect(localeDisplayName('zh-CN')).toBe('中文（中国）');
-    expect(localeDisplayName('zh-Hant')).toBe('中文（繁體）');
-    expect(localeDisplayName('en-US')).toBe('English（United States）');
-    expect(localeDisplayName('ja-JP')).toBe('日本語（日本）');
-    expect(localeDisplayName('fr')).toBe('Français');
+    // The catalog is the source of these labels, so a translator sees the language's own name.
+    expect(localeDisplayName('zh-CN')).toBe('中文（简体） · CN');
+    expect(localeDisplayName('ja-JP')).toBe('日本語');
+    expect(localeDisplayName('fr-FR')).toBe('Français · FR');
+    // The region is added only where it distinguishes: `en-US` and `en-GB` must not read alike.
+    expect(localeDisplayName('en-US')).not.toBe(localeDisplayName('en-GB'));
+  });
+
+  it('does not label two locales of one language identically', () => {
+    const seen = new Map<string, string>();
+    for (const entry of COMMON_LOCALES) {
+      const label = localeLabel(entry);
+      const previous = seen.get(label);
+      // Two entries may share a label only if they also share the language and its region — which
+      // is what `localeLabel` guards against by appending the region.
+      if (previous) expect(previous.split('-')[0]).not.toBe(entry.code.split('-')[0]);
+      seen.set(label, entry.code);
+    }
   });
 
   it('falls back to the tag rather than showing nothing', () => {

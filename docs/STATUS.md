@@ -760,6 +760,57 @@ config 里的这类标签会以一个没人看得懂的错误失败。现在按�
 审计留痕），外加容器栈实测：同一个 `zh-Hans.lproj` 场景，修复前 `locales` 是 `en-US, zh-CN(src), zh-Hans`，
 修复后是 `en-US, zh-CN(src)`。
 
+### 1.32 项目管理：配置可改，语言用选的（本轮）
+
+用户的要求：「点每个项目可以修改配置 平台那些 语言配置也可以增加 源语言和目标语言是要 key 选择 不要用手写」。
+
+改之前：项目详情页是**只读**的，语言卡片只是一张表；新建项目的表单里源语言与目标语言是两个自由输入框，
+各接受一串 BCP 47 代码。那个输入框是一个带静默失败的记忆测试——`zh-Hans` 与 `zh-CN` 对人是同一个语言、
+对数据库是两个，打错了要么得到一个关于语言标签的报错，要么更糟：建出一个没人想要的语言。
+
+**语言选择器**（`components/locale-picker.tsx`）。数据来自新的 `packages/contracts/src/locale-catalog.ts`
+（97 种语言，含 `native` 与 `english` 两个名字）：
+
+- 按代码、母语名、英文名都能搜（`中文` 能搜出全部五种中文变体，`korean` 能搜出 `ko-KR`）；
+- 下拉里同时显示 `localeLabel(entry)` 与英文名，右边是代码；
+- **列表之外的语言仍可输入**：输入 `haw-US` 这类合法标签时出现「使用 haw-US」一行。目录是便利，不是约束；
+- 目标语言是多选（`multiple` 模式），源语言单选；
+- 选源语言时会自动把它从目标语言里去掉——同一个语言在表单里出现两次读起来像错误。
+
+`localeLabel` 只在**有区分意义时**加地区：整个目录里只有一种韩语，就显示 `한국어`；英语有六种，
+必须显示 `English · US` 与 `English · GB`，否则两行一模一样，选择变成猜测。
+
+**项目设置页**（`/projects/[projectId]`）：
+
+| 能力 | 规则 |
+| --- | --- |
+| 改名称 / 描述 | 直接保存 |
+| 改平台（多选） | 作为**集合**整体提交（`PATCH /projects/:id { platforms }`），表单一次保存 |
+| 加语言 | `POST /projects/:id/locales`，名字自动用目录里的可读名（`한국어`） |
+| 删语言 | `DELETE /projects/:id/locales/:code`，源语言不可删 |
+| 改源语言 | 只在项目**还没有任何译文**时允许 |
+
+三条拒绝值得单独说，因为它们都是「现在便宜、几千条之后昂贵」的决定：
+
+1. **加一个已有语言的另一种写法会被拒**（已有 `zh-CN` 再添加 `zh-Hans`）。否则译文会被拆到两个语言下，
+   而两边的统计都看起来正常。
+2. **有译文的语言不能删**。删语言会级联删掉它的全部译文——那是该让人看着数字决定的，不该是整理列表的副产品。
+3. **源语言在有译文后不能改**。源文版本、stale 标记、三方比较基线全都锚在它上面，改锚点等于让这些
+   全部指向一个已经不存在的语言。空项目下则允许，并且支持**交换**（把源语言改成已有的某个目标语言，
+   两个 locale 的 `isSource` 互换）。
+
+平台同样有保护：不能删到最后一个（项目没有端就无处放 Key），有 Key 的端不能删（`DELETE .../platforms/:platform`）。
+
+**一个只在镜像里暴露的坑**：Web 改成 import `@localehub/contracts` 后，Docker 构建失败两次——
+先是 `web.Dockerfile` 只拷贝了 contracts 的**源码**、没跑它的 build（该包的入口是 `dist`）；补上构建后
+又撞 `node:crypto`（contracts 根的 `hash.ts` 用了它，webpack 无法为浏览器解析）。解法不是 polyfill，
+而是给 contracts 加浏览器安全的子路径导出（`@localehub/contracts/locale` 与 `/locale-catalog`），
+Web 只引用这两个——把「浏览器能用哪部分」写成显式契约，而不是指望 tree-shaking 分析 Node 内置模块。
+
+验证：215 单元（+1 语言标签唯一性）+ 129 集成（+8 项目设置：改名、加语言并命名、拒绝重复语言、删语言与
+源语言保护、空项目换源语言、有译文后拒绝换源语言、平台集合保存与「至少一个」、有 Key 的端不能删），
+以及浏览器实测三处交互。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -858,8 +909,8 @@ POST /organization/members (READONLY)          # 无 token 管理成员的越权
 | GitHub Actions `CI`（main）                      | **通过**（Run 5）                       |
 | Local / Remote MCP 真实客户端握手                | 通过（见附二）                          |
 | 端到端演示连续两次运行                           | 均通过（demo 自带项目清理，可重复执行） |
-| `pnpm test`                                      | 214 passed                              |
-| `pnpm test:integration`                          | 121 passed                              |
+| `pnpm test`                                      | 215 passed                              |
+| `pnpm test:integration`                          | 129 passed                              |
 | `node apps/e2e-demo/dist/run-demo.js`            | ALL ACCEPTANCE CHECKS PASSED            |
 | `docker compose config`（含 production overlay） | valid                                   |
 | `docker compose up -d --build`（整套栈）         | 5 个服务全部起，浏览器实测 24/24        |

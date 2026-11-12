@@ -96,8 +96,10 @@ public 路由不受影响，负载均衡仍可探测。
 | PATCH    | `/projects/:projectId`                                  | PROJECT_MANAGER            |
 | GET      | `/projects/:projectId/dashboard`                        | READONLY                   |
 | GET/POST | `/projects/:projectId/locales`                          | READONLY / PROJECT_MANAGER |
+| DELETE   | `/projects/:projectId/locales/:code`                    | PROJECT_MANAGER            |
 | GET/POST | `/projects/:projectId/members`                          | READONLY / PROJECT_MANAGER |
 | GET/POST | `/projects/:projectId/platforms`                        | READONLY / PROJECT_MANAGER |
+| DELETE   | `/projects/:projectId/platforms/:platform`              | PROJECT_MANAGER            |
 | GET      | `/projects/:projectId/keys`                             | READONLY                   |
 | GET      | `/projects/:projectId/export?locale=&format=&platform=` | READONLY                   |
 | GET      | `/projects/:projectId/audit`                            | PROJECT_MANAGER            |

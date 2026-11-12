@@ -25,7 +25,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # which inside the container is the web container itself, and every API call 500s.
 ARG API_BASE_URL_INTERNAL=http://localhost:3001/api/v1
 ENV API_BASE_URL_INTERNAL=$API_BASE_URL_INTERNAL
-RUN pnpm --filter @localehub/web build
+# The web app imports `@localehub/contracts` (locale catalog, shared types), and that package's
+# entry point is its build output — copying the source is not enough. It did not matter until the
+# app started importing it.
+RUN pnpm --filter @localehub/contracts build \
+ && pnpm --filter @localehub/web build
 
 FROM base AS runtime
 ENV NODE_ENV=production
