@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { PrismaClient } from '@localehub/database';
 import {
@@ -24,7 +25,10 @@ import {
   REMOTE_MCP_PROMPTS,
   skillPromptArgs,
   type DeliveredSkill,
+  REMOTE_MCP_INSTRUCTIONS,
+  REMOTE_MCP_IMPORT_GUIDE,
   REMOTE_MCP_TOOL_SCOPES,
+  remoteImportPrompt,
   type RemoteMcpTool,
 } from '@localehub/contracts';
 import { assertProjectBound, assertRole, assertScope, type ActorContext } from '@localehub/permissions';
@@ -77,9 +81,10 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
   const server = new McpServer(
     { name: 'localehub-remote', version: '0.1.0' },
     {
-      instructions:
-        'LocaleHub Remote MCP：只提供平台侧数据与业务工具（项目、Key、译文、术语、翻译记忆、QA、审核、同步状态）。' +
-        '它无法访问任何开发者本地文件系统。AI 生成的译文一律为草稿，审核与发布必须由具备权限的人类用户完成。',
+      // The one place a client is expected to put text in front of the model before any tool call,
+      // so it is where "how do I use this" has to be answered. See `mcp-guide.ts` for why it says
+      // what it says.
+      instructions: REMOTE_MCP_INSTRUCTIONS,
       capabilities: { tools: {}, resources: {}, prompts: {} },
     },
   );
@@ -100,7 +105,9 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
   const registerPrompt = server.registerPrompt.bind(server) as unknown as (
     name: string,
     config: { title?: string; description?: string; argsSchema?: Record<string, unknown> },
-    handler: (args: { focus?: string }) => { messages: unknown[] },
+    // `never` rather than a concrete arg shape: the prompts here take different arguments, and the
+    // SDK's own generic is what pushes TypeScript past its instantiation depth.
+    handler: (args: never) => { messages: unknown[] },
   ) => void;
 
   /**
@@ -232,8 +239,11 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
 
   define(
     'import_translations',
-    '把一批语言文件内容写入项目（建立 Key、源文版本与译文）。用于初始化：先在本地读好文件再上传。' +
-      '不带 confirm=true 时只报告会写入什么。',
+    '把本地语言文件的内容导入项目（建立 Key、源文版本与译文）。是你读文件、平台收内容：平台看不到你的磁盘。' +
+      '入参：{project_id, confirm, files:[{path, locale, platform, namespace?, entries:[{key,value}]}]}。' +
+      'locale 必须与项目 sourceLocale 逐字符相同（zh-Hans ≠ zh-CN）；platform 默认 web，iOS 要传 ios；' +
+      '多张字符串表用 namespace 区分。整个导入在一个 5 秒事务里，单次只放 300~400 条，超时整批回滚。' +
+      '默认 confirm=false 只报告不写入。细节见资源 localehub://import-guide。',
     async (input: {
       project_id: string;
       files: { path: string; locale: string; platform: string; namespace?: string; entries: { key: string; value: string }[] }[];
@@ -335,7 +345,7 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     },
   );
 
-  define('list_projects', '列出当前 token 可访问的项目', async () =>
+  define('list_projects', '列出当前 Token 可访问的项目（只返回你自己的，看不到别人的）', async () =>
     tenant.withOrganization(actor.organizationId, async (tx) => {
       const projects = await tx.project.findMany({
         where: actor.boundProjectIds?.length ? { id: { in: actor.boundProjectIds } } : {},
@@ -353,14 +363,14 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     }),
   );
 
-  define('get_project', '读取项目详情', async (input: { project_id: string }) => {
+  define('get_project', '读取项目详情：语言、平台、Key/译文计数、revision。导入前核对 state 用', async (input: { project_id: string }) => {
     assertRole(actor, input.project_id, Role.READONLY);
     return tenant.withOrganization(actor.organizationId, (tx) =>
       tx.project.findUniqueOrThrow({ where: { id: input.project_id }, include: { locales: true, platforms: true } }),
     );
   });
 
-  define('list_project_locales', '读取项目语言列表', async (input: { project_id: string }) => {
+  define('list_project_locales', '读取项目语言列表（含 sourceLocale）。导入前拿确切的 locale 代码，不要猜', async (input: { project_id: string }) => {
     assertRole(actor, input.project_id, Role.READONLY);
     return tenant.withOrganization(actor.organizationId, (tx) =>
       tx.locale.findMany({ where: { projectId: input.project_id }, orderBy: { code: 'asc' } }),
@@ -371,7 +381,7 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
 
   define(
     'search_translation_keys',
-    '检索翻译 Key',
+    '检索翻译 Key：按关键词/语言/状态/端过滤，返回条目 id 与当前值（分页，用 cursor 续取）',
     async (input: {
       project_id: string;
       query?: string;
@@ -435,7 +445,7 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     },
   );
 
-  define('get_glossary', '读取术语库', async (input: { project_id: string; locale?: string }) => {
+  define('get_glossary', '读取术语库：术语、指定语言的译法、是否禁止改写', async (input: { project_id: string; locale?: string }) => {
     assertRole(actor, input.project_id, Role.READONLY);
     return tenant.withOrganization(actor.organizationId, (tx) =>
       tx.glossaryTerm.findMany({
@@ -446,7 +456,7 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
 
   define(
     'search_translation_memory',
-    '检索翻译记忆',
+    '检索翻译记忆：历史上出现过的相似译文，用于保持用词一致',
     async (input: { project_id: string; query: string; locale?: string; limit?: number }) => {
       assertRole(actor, input.project_id, Role.READONLY);
       return tenant.withOrganization(actor.organizationId, (tx) =>
@@ -565,7 +575,7 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
 
   define(
     'get_qa_issues',
-    '读取 QA 问题',
+    '读取 QA 问题：空译文、占位符不一致、缺译、过期、标签不匹配等，带严重级别',
     async (input: { project_id: string; locale?: string; severity?: string; limit?: number }) => {
       assertRole(actor, input.project_id, Role.READONLY);
       return tenant.withOrganization(actor.organizationId, (tx) =>
@@ -633,7 +643,7 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
 
   define(
     'submit_review',
-    '提交审核',
+    '把译文提交审核（状态置为待审核并生成审核任务）。不会替你批准',
     async (input: { project_id: string; entry_ids: string[]; locales?: string[]; comment?: string }) => {
       assertRole(actor, input.project_id, Role.TRANSLATOR);
       const submitted = await tenant.withOrganization(actor.organizationId, async (tx) => {
@@ -689,14 +699,14 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
 
   /* ------------------------------------------------------------------- sync view */
 
-  define('get_project_sync_status', '读取仓库同步状态（只读；不触碰开发者机器）', async (input: { project_id: string }) => {
+  define('get_project_sync_status', '读取仓库同步状态：连接、最近一次扫描、待推/待拉的计数（只读；不触碰开发者机器）', async (input: { project_id: string }) => {
     assertRole(actor, input.project_id, Role.READONLY);
     return sync.syncStatus(input.project_id, actor);
   });
 
   define(
     'get_pending_platform_changes',
-    '读取待拉取的平台变更（默认 APPROVED）',
+    '读取平台侧已审核、尚未写进仓库的变更。每条带 translationVersionId——写回后用 mark_applied 回报时要用它',
     async (input: { project_id: string; locale?: string; status?: string; since_revision?: number; limit?: number }) => {
       assertRole(actor, input.project_id, Role.READONLY);
       return sync.getChanges(
@@ -820,9 +830,22 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     }),
   );
 
+  server.registerResource(
+    'import-guide',
+    'localehub://import-guide',
+    {
+      title: 'Import guide',
+      description: 'How to upload localization files: call shape, the rules that cannot be undone, and the batching limit',
+      mimeType: 'text/markdown',
+    },
+    async (uri) => ({
+      contents: [{ uri: uri.href, mimeType: 'text/markdown', text: REMOTE_MCP_IMPORT_GUIDE }],
+    }),
+  );
+
   /* -------------------------------------------------------------------- prompts */
 
-  server.registerPrompt(
+  registerPrompt(
     'review-localization-changes',
     { title: 'Review localization changes', description: '审核平台侧译文变更' },
     () => ({
@@ -838,7 +861,7 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     }),
   );
 
-  server.registerPrompt(
+  registerPrompt(
     'fix-translation-issues',
     { title: 'Fix translation issues', description: '根据 QA 问题给出修复草稿' },
     () => ({
@@ -851,6 +874,21 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
           },
         },
       ],
+    }),
+  );
+
+  registerPrompt(
+    'import-localization-files',
+    {
+      title: 'Import localization files',
+      description: '把仓库里的语言文件导入 LocaleHub（推导 locale 与 platform → dry run → 分批导入）',
+      argsSchema: {
+        projectId: z.string().optional().describe('目标项目 id；省略则先调 list_projects'),
+        localesDir: z.string().optional().describe('仓库里语言文件的目录，例如 locales 或 ios/Resources'),
+      },
+    },
+    (args: { focus?: string; projectId?: string; localesDir?: string }) => ({
+      messages: [{ role: 'user', content: { type: 'text', text: remoteImportPrompt(args ?? {}) } }],
     }),
   );
 

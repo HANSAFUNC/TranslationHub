@@ -675,6 +675,50 @@ REST 视图一致 → 审计有 `sync.apply` 且带 `via: mark_applied` 与 comm
 平台在期间又改了一版时旧版本号被拒（且真的什么都没改）→ 只有 `sync.push` 的 Token 调 `mark_applied`
 得到 `SCOPE_INSUFFICIENT`，但仍能做它被授权的事。
 
+### 1.30 MCP 之前不教怎么用（本轮新增 instructions / 教程资源 / 提示词）
+
+起因是一份真实记录：一个 Agent 连上来，用「发畸形请求看报错」的方式摸 `import_translations` 的入参，三次
+往返才问出 `files[0].entries[0].key`，最后写下「MCP 只报字段名，无文档」。
+
+**这个判断是错的，但结论是对的**——schema 一直是完整的（`tools/list` 返回 `required`、嵌套结构、类型、
+`default`、`min/max`），只是**没有任何一层在教**。它的试错方法还有个结构性缺陷：报错只列**必填**字段，
+凡是带默认值的字段全部隐身，而这里带默认值的恰好是最危险的三个：
+
+| 字段 | 默认值 | 不显式传会怎样 |
+| --- | --- | --- |
+| `platform` | `web` | iOS 的 key 全部落到 `web` 下。platform 是 key 身份的一部分，之后用 `ios` 扫同一批文件会变成两套不相干的 key |
+| `namespace` | `''` | iOS 的 Localizable / InfoPlist / LaunchScreen 三张表拍平成一个 key 空间，同名 key 互相覆盖且不报错 |
+| `confirm` | `false` | 这个默认是对的，但它不知道——于是把「安全的两段式」当成「5800 条不可逆写入」在担心 |
+
+所以现在补了四层，各司其职：
+
+| 层 | 内容 |
+| --- | --- |
+| `instructions` | 两个方向别搞反（仓库→平台 / 平台→仓库）、三条事后难改的规则、分批上限、dry-run 默认 |
+| `localehub://import-guide` | 完整教程：调用形状、逐条规则、实测边界、推荐顺序、`.strings` 解析坑 |
+| `import-localization-files` 提示词 | 七步流程（读文件 → 推 locale/platform → dry run → 分批导入 → 核对），供人从客户端直接唤起 |
+| 工具与字段 `description` | 每个字段在什么情况下会出错；**字段描述随 schema 走，所以默认值也能被解释** |
+
+字段描述是关键：`platform` 在 schema 里现在是
+`{"type":"string","enum":[…],"default":"web","description":"默认是 web：iOS 请传 'ios'…platform 是 key 身份的一部分"}`。
+这正是试错法拿不到的东西。
+
+**顺带把上传上限量清楚了**（此前只是从代码推断）。整个导入跑在一个 Prisma 交互式事务里，默认超时 5 秒：
+
+| 单次调用条目数 | 结果 |
+| --- | --- |
+| 400 | 成功，约 3.2 秒 |
+| 1000 | 失败：`Transaction already closed: … timeout was 5000 ms` |
+| 1400 | 失败：同上 |
+
+失败是原子的（超时那次落库 0 条）。教程因此给的是「按文件 × 语言拆开，每批 300~400 条」，并说明重复导入
+幂等（未改动的值判 `changed:false`，不产生重复版本）。一万条 key 约 30 次调用——这是当前实现的真实上限，
+把工具改成服务端自动分批是后续项（见 §5）。
+
+验证：19 个 MCP 单测（其中 12 个新增，覆盖 instructions 的两方向与三条规则、教程资源的 URI/mime/必含条款、
+提示词的参数渲染与「发现 platform/locale 不符要停下来」、带默认值字段必须有描述、任何工具都不许没有描述），
+外加容器栈上用真实 MCP 客户端读取确认。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -773,7 +817,7 @@ POST /organization/members (READONLY)          # 无 token 管理成员的越权
 | GitHub Actions `CI`（main）                      | **通过**（Run 5）                       |
 | Local / Remote MCP 真实客户端握手                | 通过（见附二）                          |
 | 端到端演示连续两次运行                           | 均通过（demo 自带项目清理，可重复执行） |
-| `pnpm test`                                      | 194 passed                              |
+| `pnpm test`                                      | 205 passed                              |
 | `pnpm test:integration`                          | 113 passed                              |
 | `node apps/e2e-demo/dist/run-demo.js`            | ALL ACCEPTANCE CHECKS PASSED            |
 | `docker compose config`（含 production overlay） | valid                                   |
@@ -820,13 +864,14 @@ docker buildx build --network host -f docker/web.Dockerfile -t localehub-web .
 | Remote MCP（Streamable HTTP）被真实 MCP Client 连接 | `connected: localehub-remote 0.1.0`                                                             |
 | Remote MCP 工具数                                   | 18（规格 §6.4 的 15 个 + `create_project` / `import_translations` / `mark_applied`，见 §1.27、§1.29） |
 | MCP 是否校验 Token scope                            | 是：`REMOTE_MCP_TOOL_SCOPES` 在包装层统一断言，映射逐条对齐 REST（集成测试断言，见 §1.29）      |
+| MCP 是否教怎么用                                    | 是：`instructions` + `localehub://import-guide` + `import-localization-files` 提示词 + 字段级描述（见 §1.30） |
 | MCP 写入是否进审计                                  | 是：7 个写工具写 `audit_logs`，`actor_type='mcp'`，只读与 dry-run 不写（集成测试断言，见 §1.28） |
 | `mark_applied` 闭环（容器栈实测）                   | 通过：pending → dry-run（不建 session）→ 确认（建 session）→ 平台不再下发 → 审计有 `sync.apply` |
 | 只带 `project.read` 的 Token 调 `import_translations` | 被拒（`SCOPE_INSUFFICIENT`）——修复前实测可写库，见 §1.29                                    |
 | 只带 `sync.push` 的 Token 调 `mark_applied`         | 被拒（`SCOPE_INSUFFICIENT: translation.apply`）                                              |
 | Remote MCP 是否暴露本地文件工具                     | 否（检查 `read_local_file` / `write_local_file` / `read_file` / `exec` 均不存在）               |
 | `list_projects` / `get_project_sync_status`         | 正常返回                                                                                        |
-| Remote MCP Resources / Prompts                      | 7 / 7（`qa-rules` + `skills` + `skills/{slug}` + 3 个 Skill resource；2 内置 + 5 Skill prompt） |
+| Remote MCP Resources / Prompts                      | 8 / 8（`qa-rules` + `import-guide` + `skills` + `skills/{slug}` + 3 个 Skill resource；3 内置 + 5 Skill prompt） |
 | `localehub://skills/{slug}`                         | 返回完整 `SKILL.md`（含 frontmatter），`text/markdown`                                          |
 | 未发布 slug 的 resource 读取                        | 被拒绝（`NOT_FOUND`），不是返回空文档                                                           |
 | `/mcp/tools` 声明的 resource 与 prompt              | 与上面实测逐条一致（集成测试断言，非人工比对）                                                  |

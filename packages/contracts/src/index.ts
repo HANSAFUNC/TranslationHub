@@ -8,6 +8,7 @@ export * from './placeholders';
 export * from './keys';
 export * from './schemas';
 export * from './mcp-tools';
+export * from './mcp-guide';
 export * from './mcp-schema-export';
 export * from './mcp-config';
 export * from './mcp-skills';

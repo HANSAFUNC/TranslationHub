@@ -79,7 +79,7 @@ Web 端「MCP 管理 → 接入教程」是同一份流程，且会用**你自�
 export LOCALEHUB_TOKEN="lh_mcp_…"   # 存进环境变量，不要提交到 Git
 ```
 
-**第 2 步：拿到你的 `project_id`。** 17 个工具里有 14 个把它当第一个参数，而它是个 UUID——
+**第 2 步：拿到你的 `project_id`。** 18 个工具里有 16 个把它当第一个参数，而它是个 UUID——
 不能靠猜。
 
 两种拿法：
@@ -269,6 +269,39 @@ apply report，所以 Agent 的落地在同步历史里和人跑 CLI 的落地�
 
 其余工具与 REST 对应路由一致：只需要角色。`translation.apply` 不在默认 scope 集合里，所以默认签发的
 Token 推得上去、落不下来——这正是规格要的分离。
+
+### 2.7 MCP 自己教怎么用：instructions / 资源 / 提示词 / 字段描述
+
+上一轮暴露的问题很具体：一个 Agent 连上来，用「发畸形请求看报错」的方式摸 `import_translations` 的入参——
+三次往返才问出 `files[0].entries[0].key`，而且**永远问不出带默认值的字段**，因为报错只会说必填项。带默认值
+的恰好是最危险的三个（`platform`、`namespace`、`confirm`）。它自己给出的结论是「MCP 只报字段名，无文档」。
+
+实际上 schema 一直是完整的。问题在于**没有任何一层在教**。现在四个层次各司其职：
+
+| 层 | 内容 | 谁会看到 |
+| --- | --- | --- |
+| `instructions` | 两个方向别搞反、三条事后难改的规则、分批上限、dry-run 默认 | 客户端在调用任何工具前放进上下文 |
+| `localehub://import-guide` | 完整上传教程：调用形状、逐条规则、实测边界、推荐顺序、`.strings` 解析坑 | Agent 按需读取 |
+| `import-localization-files` 提示词 | 七步流程，供人在客户端里直接唤起 | 人（斜杠命令） |
+| 工具与字段的 `description` | 每个字段在什么情况下会出错（如 `platform` 默认 `web`，iOS 必须显式传） | 随 `tools/list` 一起下发 |
+
+关键一条：**字段描述随 schema 走，所以默认值也能被解释**。`platform` 的 schema 现在是
+`{"default":"web","description":"默认是 web：iOS 请传 'ios' …platform 是 key 身份的一部分"}`——
+这正是试错法拿不到的信息。
+
+### 2.8 上传的真实边界（实测）
+
+整个导入（scan → preview → push）跑在**一个 Prisma 交互式事务**里，默认超时 5 秒。实测结果：
+
+| 单次调用条目数 | 结果 |
+| --- | --- |
+| 400 | 成功，约 3.2 秒 |
+| 1000 | 失败：`Transaction already closed: … timeout was 5000 ms` |
+| 1400 | 失败：同上 |
+
+**失败是原子的**——超时那一次落库 0 条，不会写半份。所以教程给的是「按文件 × 语言拆开，每批 300~400 条」，
+并且说明重复导入是幂等的（未改动的值判 `changed:false`，不产生重复版本）。一万条 key 约 30 次调用，不优雅，
+但这是当前实现的真实上限。
 
 ## 3. 本地仓库操作：CLI（不是 MCP）
 

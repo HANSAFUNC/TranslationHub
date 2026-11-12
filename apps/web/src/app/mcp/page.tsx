@@ -126,10 +126,12 @@ function McpOnboarding({ snippets, remoteUrl }: { snippets?: McpClientSnippets; 
             what="对 Agent 说的第一句话"
             language="bash"
             code={[
-              '读取这个仓库里的语言文件（locales/**），然后：',
-              '1. 用 create_project 建一个项目，source_locale 用源语言，locales 列出其余语言；',
-              '2. 把读到的内容用 import_translations 上传，先不传 confirm 看一遍会写什么，我确认后再传；',
-              '3. 把返回的 config 写进 .localehub/config.yaml。',
+              '先读 LocaleHub 的 localehub://import-guide（上传教程），然后：',
+              '1. 读这个仓库里的语言文件（locales/**），解析成 key/value；',
+              '2. 用 create_project 建项目，source_locale 用源语言，platforms 用实际端（iOS 就是 ios）；',
+              '3. 用 import_translations 上传：先 confirm=false 跑一遍，把 locale 与 platform 的判定理由告诉我，',
+              '   我确认后按每批 300~400 条分批导入；',
+              '4. 把返回的 config 写进 .localehub/config.yaml。',
             ].join('\n')}
           />
           <p className="text-muted-foreground text-xs">
