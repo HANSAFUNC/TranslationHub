@@ -628,6 +628,222 @@ describe('creating a project', () => {
     });
   });
 
+  /**
+   * The repository is the authority on which languages it holds.
+   *
+   * The ordinary iOS layout is `zh-Hans.lproj` in the checkout and `zh-CN` on the platform. Before
+   * this, the import created a *second* Chinese locale — and because the code no longer equalled
+   * `sourceLocale`, it was not treated as source either, so the project ended up with translated
+   * text and no reference to translate from. Silently, in both directions.
+   */
+  describe('expanding the project from what the repository has', () => {
+    interface Expansion {
+      localesAdded: string[];
+      localesMatched: { from: string; to: string }[];
+      platformsAdded: string[];
+    }
+    interface ImportResult {
+      dryRun: boolean;
+      files: { path: string; locale: string; isSource: boolean }[];
+      expansion: Expansion;
+    }
+
+    const localesOf = async (id: string) => {
+      const result = await client!.callTool({ name: 'list_project_locales', arguments: { project_id: id } });
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      return payload<{ code: string; name: string; isSource: boolean }[]>(result);
+    };
+
+    const importFiles = async (id: string, files: unknown[], confirm: boolean) =>
+      client!.callTool({ name: 'import_translations', arguments: { project_id: id, confirm, files } });
+
+    let zhProject = '';
+
+    it('creates the project the iOS way round: zh-CN source, web platform', async () => {
+      const result = await client!.callTool({
+        name: 'create_project',
+        arguments: { name: `iOS layout ${runId}`, source_locale: 'zh-CN', locales: ['en-US'], platforms: ['web'] },
+      });
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      zhProject = payload<{ project: { id: string } }>(result).project.id;
+      expect((await localesOf(zhProject)).map((row) => row.code).sort()).toEqual(['en-US', 'zh-CN']);
+    });
+
+    it('recognises zh-Hans as the project\'s zh-CN instead of inventing a second Chinese', async () => {
+      const result = await importFiles(
+        zhProject,
+        [
+          {
+            path: 'zh-Hans.lproj/Localizable.strings',
+            locale: 'zh-Hans',
+            platform: 'web',
+            namespace: 'Localizable',
+            entries: [{ key: 'greeting', value: '你好' }],
+          },
+        ],
+        false,
+      );
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      const preview = payload<ImportResult>(result);
+
+      // The dry run has to say so — "nothing was written" is useless on its own when the caller's
+      // real question is whether their directory is about to become a second Chinese locale.
+      expect(preview.dryRun).toBe(true);
+      expect(preview.expansion.localesMatched).toEqual([{ from: 'zh-Hans', to: 'zh-CN' }]);
+      expect(preview.expansion.localesAdded).toEqual([]);
+      expect(preview.files[0]?.locale).toBe('zh-CN');
+      expect(preview.files[0]?.isSource).toBe(true);
+
+      // And it really wrote nothing.
+      expect((await localesOf(zhProject)).map((row) => row.code).sort()).toEqual(['en-US', 'zh-CN']);
+    });
+
+    it('lands it as source once confirmed', async () => {
+      const result = await importFiles(
+        zhProject,
+        [
+          {
+            path: 'zh-Hans.lproj/Localizable.strings',
+            locale: 'zh-Hans',
+            platform: 'web',
+            namespace: 'Localizable',
+            entries: [{ key: 'greeting', value: '你好' }],
+          },
+        ],
+        true,
+      );
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      const imported = payload<ImportResult>(result);
+      expect(imported.expansion.localesMatched).toEqual([{ from: 'zh-Hans', to: 'zh-CN' }]);
+
+      // One Chinese, not two — and the text is source text.
+      const locales = await localesOf(zhProject);
+      expect(locales.map((row) => row.code).sort()).toEqual(['en-US', 'zh-CN']);
+      expect(locales.find((row) => row.code === 'zh-CN')?.isSource).toBe(true);
+
+      // Read back through the platform's own API: the value is stored under the project's `zh-CN`,
+      // which is the whole point — the repository said `zh-Hans`.
+      const entry = await call<{ value: string; locale: string }>(
+        `/projects/${zhProject}/entry-by-key?key=greeting&locale=zh-CN`,
+        { token: session.token },
+      );
+      expect(entry.status, JSON.stringify(entry.body.error)).toBe(200);
+      expect(entry.body.data?.value).toBe('你好');
+      expect(entry.body.data?.locale).toBe('zh-CN');
+    });
+
+    it('adds a language the project has never seen, and says which', async () => {
+      const result = await importFiles(
+        zhProject,
+        [
+          { path: 'locales/fr-FR/a.json', locale: 'fr-FR', platform: 'web', entries: [{ key: 'greeting', value: 'Bonjour' }] },
+        ],
+        true,
+      );
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      expect(payload<ImportResult>(result).expansion.localesAdded).toEqual(['fr-FR']);
+
+      const locales = await localesOf(zhProject);
+      const french = locales.find((row) => row.code === 'fr-FR');
+      expect(french).toBeTruthy();
+      // A locale the platform invents is named after the language, not after its own code.
+      expect(french?.name).toBe('Français（France）');
+      expect(french?.isSource).toBe(false);
+    });
+
+    it('reports the platform it would add, before adding it', async () => {
+      const preview = payload<ImportResult>(
+        await importFiles(
+          zhProject,
+          [
+            {
+              path: 'ios/ja.lproj/Localizable.strings',
+              locale: 'ja-JP',
+              platform: 'ios',
+              namespace: 'Localizable',
+              entries: [{ key: 'greeting', value: 'こんにちは' }],
+            },
+          ],
+          false,
+        ),
+      );
+      // The platform has no `ios` yet; a preview that stayed silent about that would be answering
+      // half the question.
+      expect(preview.expansion.platformsAdded).toEqual(['ios']);
+      expect(preview.expansion.localesAdded).toEqual(['ja-JP']);
+      const project = await call<{ platforms: { platform: string }[] }>(`/projects/${zhProject}`, {
+        token: session.token,
+      });
+      // …and it really did not add it.
+      expect((project.body.data?.platforms ?? []).map((row) => row.platform)).toEqual(['web']);
+    });
+
+    it('adds a platform the project did not declare, and reports it', async () => {
+      const result = await importFiles(
+        zhProject,
+        [
+          {
+            path: 'ios/ja.lproj/Localizable.strings',
+            locale: 'ja-JP',
+            platform: 'ios',
+            namespace: 'Localizable',
+            entries: [{ key: 'greeting', value: 'こんにちは' }],
+          },
+        ],
+        true,
+      );
+      expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+      const imported = payload<ImportResult>(result);
+      expect(imported.expansion.platformsAdded).toEqual(['ios']);
+      expect(imported.expansion.localesAdded).toEqual(['ja-JP']);
+
+      const project = await call<{ platforms: { platform: string }[] }>(`/projects/${zhProject}`, {
+        token: session.token,
+      });
+      expect((project.body.data?.platforms ?? []).map((row) => row.platform).sort()).toEqual(['ios', 'web']);
+    });
+
+    it('refuses to guess when a bare language could mean two locales', async () => {
+      const created = await client!.callTool({
+        name: 'create_project',
+        arguments: { name: `Ambiguous ${runId}`, source_locale: 'zh-CN', locales: ['zh-TW'], platforms: ['web'] },
+      });
+      const ambiguousProject = payload<{ project: { id: string } }>(created).project.id;
+
+      const result = await importFiles(
+        ambiguousProject,
+        [{ path: 'locales/zh/a.json', locale: 'zh', platform: 'web', entries: [{ key: 'greeting', value: '你好' }] }],
+        true,
+      );
+      expect(result.isError).toBe(true);
+      const message = JSON.stringify(result.content);
+      expect(message).toContain('INVALID_LOCALE');
+      expect(message).toContain('zh-CN');
+      expect(message).toContain('zh-TW');
+
+      // Nothing was added on the way to refusing.
+      expect((await localesOf(ambiguousProject)).map((row) => row.code).sort()).toEqual(['zh-CN', 'zh-TW']);
+    });
+
+    it('records the expansion in the audit trail', async () => {
+      const audited = await call<{ action: string; metadata: Record<string, unknown> }[]>(
+        `/projects/${zhProject}/audit`,
+        { token: session.token },
+      );
+      // One row per import, so the expansion is the union of what each of them added. This is the
+      // record that answers "where did this language come from".
+      const pushes = (audited.body.data ?? []).filter((entry) => entry.action === 'sync.push');
+      expect(pushes.length).toBeGreaterThanOrEqual(3);
+      const added = pushes.flatMap((entry) => (entry.metadata.localesAdded as string[]) ?? []);
+      expect(added.sort()).toEqual(['fr-FR', 'ja-JP']);
+      // Only the confirming call writes an audit row; the dry run above deliberately writes none.
+      const matched = pushes.flatMap((entry) => (entry.metadata.localesMatched as { from: string; to: string }[]) ?? []);
+      expect(matched).toEqual([{ from: 'zh-Hans', to: 'zh-CN' }]);
+      const platforms = pushes.flatMap((entry) => (entry.metadata.platformsAdded as string[]) ?? []);
+      expect(platforms).toEqual(['ios']);
+    });
+  });
+
   it('refuses a project the token is not bound to', async () => {
     const other = await call<{ id: string }>('/projects', {
       method: 'POST',

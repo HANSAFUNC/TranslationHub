@@ -248,6 +248,22 @@ export interface ApplyReportItem {
   errorMessage?: string;
 }
 
+/**
+ * What an ingest added to a project that the project did not already have.
+ *
+ * Returned by a scan (and by the MCP import, including its dry run) because a repository is the
+ * authority on which languages it holds: `zh-Hans.lproj` in the checkout, `zh-CN` on the platform.
+ * Expansion that happens silently is indistinguishable from a typo creating a stray language.
+ */
+export interface ProjectShapeExpansion {
+  /** Locales created because the project had no equivalent of them. */
+  localesAdded: string[];
+  /** Incoming tags matched to an existing code that means the same language. */
+  localesMatched: { from: string; to: string }[];
+  /** Platforms added to the project because content arrived for them. */
+  platformsAdded: string[];
+}
+
 export interface ApplyReportRequest {
   syncSessionId: string;
   repositoryConnectionId?: string | null;

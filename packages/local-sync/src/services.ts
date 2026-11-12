@@ -9,6 +9,7 @@ import {
   type ConflictRecord,
   type ConflictResolution,
   type PlatformChange,
+  type ProjectShapeExpansion,
   type PushResult,
 } from '@localehub/contracts';
 import { ApiClient, type SyncPreviewResponse } from '@localehub/api-client';
@@ -190,11 +191,11 @@ export class LocalSyncServices {
     });
 
     // Upload the scan so the platform can compute the three-way comparison.
-    let uploaded: { connectionId: string } | null = null;
+    let uploaded: { connectionId: string; expansion: ProjectShapeExpansion | null } | null = null;
     let uploadError: string | null = null;
     try {
       const response = await this.client().uploadScan(payload);
-      uploaded = { connectionId: response.connectionId };
+      uploaded = { connectionId: response.connectionId, expansion: response.expansion ?? null };
       this.store().patch({
         projectId,
         connectionId: response.connectionId,
@@ -208,14 +209,30 @@ export class LocalSyncServices {
     this.lastScan = { result, summary, payload: { projectId, scanId } };
     this.store().record('scan_local_project', `${summary.filesScanned} files, ${summary.entriesFound} entries`);
 
+    // The platform adds any language or platform the repository has and the project does not, so
+    // the scan has to say when it did — otherwise a first push silently grows the project's locale
+    // list and nobody learns about it until the project page shows an unfamiliar language.
+    const expansion = uploaded?.expansion ?? null;
+    const expanded = expansion
+      ? [
+          ...expansion.localesAdded.map((code) => `${code}（新增语言）`),
+          ...expansion.localesMatched.map((row) => `${row.from} → ${row.to}（已归入现有语言）`),
+          ...expansion.platformsAdded.map((platform) => `${platform}（新增端）`),
+        ]
+      : [];
+
     return {
       ...summary,
       uploaded: uploaded !== null,
       uploadError,
       connectionId: uploaded?.connectionId ?? null,
+      expansion,
+      expanded,
       localOnly: uploaded === null,
       hint: uploaded
-        ? 'Scan uploaded. Call preview_sync to compute the three-way diff.'
+        ? expanded.length
+          ? `Scan uploaded; the platform also added ${expanded.join('、')}. Call preview_sync to compute the three-way diff.`
+          : 'Scan uploaded. Call preview_sync to compute the three-way diff.'
         : 'Scan works offline. Start the API and re-run scan_local_project before push/pull.',
     };
   }

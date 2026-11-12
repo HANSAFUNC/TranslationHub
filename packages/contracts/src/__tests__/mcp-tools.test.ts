@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { REMOTE_MCP_TOOL_SCOPES, REMOTE_MCP_TOOLS, remoteToolSchemas } from '../mcp-tools';
+import { localeDisplayName, resolveLocaleTag } from '../locale';
 import { ALL_MCP_SCOPES } from '../roles';
 
 /**
@@ -53,5 +54,65 @@ describe('the Remote MCP tool registry', () => {
       'platform',
       'translation_version_id',
     ]);
+  });
+});
+
+/**
+ * Matching an incoming tag to what the project already has.
+ *
+ * The case that matters is the ordinary iOS layout: the repository holds `zh-Hans.lproj` while the
+ * project's source locale is `zh-CN`. Before this, the platform created a second Chinese locale,
+ * and because the code no longer equalled `sourceLocale` the import was not treated as source at
+ * all — no source versions, no reference text, silently.
+ */
+describe('resolveLocaleTag', () => {
+  it('prefers an exact match', () => {
+    expect(resolveLocaleTag('zh-CN', ['zh-CN', 'en-US'])).toEqual({ code: 'zh-CN', reason: 'exact' });
+  });
+
+  it('treats a script and a region as the same Chinese', () => {
+    expect(resolveLocaleTag('zh-Hans', ['zh-CN', 'en-US'])).toEqual({ code: 'zh-CN', reason: 'equivalent' });
+    expect(resolveLocaleTag('zh-CN', ['zh-Hans', 'en-US'])).toEqual({ code: 'zh-Hans', reason: 'equivalent' });
+    expect(resolveLocaleTag('zh-Hant', ['zh-TW'])).toEqual({ code: 'zh-TW', reason: 'equivalent' });
+  });
+
+  it('does not confuse Simplified with Traditional', () => {
+    // The expensive mistake this rule exists to prevent.
+    expect(resolveLocaleTag('zh-Hant', ['zh-CN'])).toEqual({ code: 'zh-Hant', reason: 'new' });
+  });
+
+  it('reads a bare language as the only locale that speaks it', () => {
+    expect(resolveLocaleTag('ja', ['ja-JP', 'en-US'])).toEqual({ code: 'ja-JP', reason: 'equivalent' });
+    expect(resolveLocaleTag('en', ['en-US'])).toEqual({ code: 'en-US', reason: 'equivalent' });
+  });
+
+  it('refuses to guess when more than one locale could be meant', () => {
+    const resolution = resolveLocaleTag('zh', ['zh-CN', 'zh-TW']);
+    expect(resolution.reason).toBe('ambiguous');
+    expect(resolution.candidates).toEqual(['zh-CN', 'zh-TW']);
+    expect(resolveLocaleTag('en', ['en-US', 'en-GB']).reason).toBe('ambiguous');
+  });
+
+  it('treats a language the project has never seen as new', () => {
+    expect(resolveLocaleTag('fr-FR', ['en-US', 'ja-JP'])).toEqual({ code: 'fr-FR', reason: 'new' });
+    expect(resolveLocaleTag('ko-KR', [])).toEqual({ code: 'ko-KR', reason: 'new' });
+  });
+
+  it('canonicalises the code it returns', () => {
+    expect(resolveLocaleTag('fr-fr', []).code).toBe('fr-FR');
+  });
+});
+
+describe('localeDisplayName', () => {
+  it('names the languages a project is likely to grow', () => {
+    expect(localeDisplayName('zh-CN')).toBe('中文（中国）');
+    expect(localeDisplayName('zh-Hant')).toBe('中文（繁體）');
+    expect(localeDisplayName('en-US')).toBe('English（United States）');
+    expect(localeDisplayName('ja-JP')).toBe('日本語（日本）');
+    expect(localeDisplayName('fr')).toBe('Français');
+  });
+
+  it('falls back to the tag rather than showing nothing', () => {
+    expect(localeDisplayName('xx-QQ')).toBe('xx-QQ');
   });
 });

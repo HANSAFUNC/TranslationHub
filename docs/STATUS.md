@@ -719,6 +719,47 @@ REST 视图一致 → 审计有 `sync.apply` 且带 `via: mark_applied` 与 comm
 提示词的参数渲染与「发现 platform/locale 不符要停下来」、带默认值字段必须有描述、任何工具都不许没有描述），
 外加容器栈上用真实 MCP 客户端读取确认。
 
+### 1.31 仓库有、平台没有的语言（本轮新增自动扩充）
+
+用户要求：「当平台没有仓库的 locale 的时候 要支持自动扩充」。先实测现状，发现两个缺口，一个比一个贵：
+
+**缺口一：确实会自动建，但是静默的。** 导入 `zh-Hant`、`fr-FR` 时 `ensureLocale` 会建语言行——返回
+`{created: 1}`，没有任何地方说明项目多了两个语言，只有事后打开项目页才发现。
+
+**缺口二：等价标签不被认成同一个语言。** 这是真正花钱的那个。项目 `sourceLocale = zh-CN`，iOS 仓库的源目录
+是 `zh-Hans.lproj`。实测：平台**新建了一个 `zh-Hans` 语言**，`locales` 变成 `en-US, zh-CN(src), zh-Hans`——
+而且因为 `zh-Hans !== zh-CN`，这批内容**不被当作源文**：`upsertSourceVersion` 不执行，译文全部
+`basedOnSourceVersionId = null`。项目变成「有译文、没有原文」，占位符校验、源文变更标 stale、AI 翻译全部
+失去参照物，**全程不报错**。
+
+修法是把「扩充」定义成三件事，而不是一件：
+
+| 情况 | 行为 |
+| --- | --- |
+| 代码相同 | 直接用 |
+| 等价标签 | 归入项目已有的那个（`zh-Hans` → `zh-CN`、`zh-Hant` → `zh-TW`、`en` → `en-US`、`ja` → `ja-JP`） |
+| 项目没有 | 新建语言行，名字用可读名（`localeDisplayName`：`中文（中国）`、`Français（France）`、`한국어`） |
+| 无法判断 | **拒绝**：项目同时有 `zh-CN` 和 `zh-TW` 而来的是 `zh`，返回 409 `INVALID_LOCALE` 并列出候选 |
+
+platform 同样处理：项目只声明 `web`，内容来了 `ios`，就自动加上 `project_platforms`。
+
+等价判断**刻意写死在一张小表里**（只有中文的脚本↔地区真正互替，加上「光秃秃的语言对上唯一匹配」），不猜
+CLDR 的 likely-subtags——认错方向的代价是把繁体归到简体下。
+
+**顺带修掉 `canonicalizeLocaleTag` 的一个真实缺陷**：它号称「小写语言、Title 脚本、大写地区」，但遇到
+`pt-br`、`zh-hans` 这种输入时既不修也不报，返回原样，而 `isValidLocaleTag` 又会拒绝——于是目录名和手写
+config 里的这类标签会以一个没人看得懂的错误失败。现在按位置修大小写（紧跟语言的四字母只能是脚本，
+两字母或三位数字只能是地区），因为位置使这个修复无歧义。
+
+**可预见性是重点**，所以 `expansion` 出现在三个地方：dry run 的返回值（「什么都没写」在调用方真正想知道
+「这次导入会让项目变成什么样」时毫无用处）、`sync.push` 审计行、以及 `localehub scan` 的输出。dry run 里
+`platformsAdded` 一度是空的——在容器栈上跑出来才发现的，已补并加了回归测试。
+
+验证：9 个契约单测（等价、不混淆繁简、光秃标签、歧义拒绝、可读名字、大小写修复）+ 8 个集成测试（zh-Hans
+归入 zh-CN 且判为源文、真新语言被新增且命名、新端被加上、dry run 报告但真的不写、歧义被拒且候选列出、
+审计留痕），外加容器栈实测：同一个 `zh-Hans.lproj` 场景，修复前 `locales` 是 `en-US, zh-CN(src), zh-Hans`，
+修复后是 `en-US, zh-CN(src)`。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -817,8 +858,8 @@ POST /organization/members (READONLY)          # 无 token 管理成员的越权
 | GitHub Actions `CI`（main）                      | **通过**（Run 5）                       |
 | Local / Remote MCP 真实客户端握手                | 通过（见附二）                          |
 | 端到端演示连续两次运行                           | 均通过（demo 自带项目清理，可重复执行） |
-| `pnpm test`                                      | 205 passed                              |
-| `pnpm test:integration`                          | 113 passed                              |
+| `pnpm test`                                      | 214 passed                              |
+| `pnpm test:integration`                          | 121 passed                              |
 | `node apps/e2e-demo/dist/run-demo.js`            | ALL ACCEPTANCE CHECKS PASSED            |
 | `docker compose config`（含 production overlay） | valid                                   |
 | `docker compose up -d --build`（整套栈）         | 5 个服务全部起，浏览器实测 24/24        |
@@ -865,6 +906,7 @@ docker buildx build --network host -f docker/web.Dockerfile -t localehub-web .
 | Remote MCP 工具数                                   | 18（规格 §6.4 的 15 个 + `create_project` / `import_translations` / `mark_applied`，见 §1.27、§1.29） |
 | MCP 是否校验 Token scope                            | 是：`REMOTE_MCP_TOOL_SCOPES` 在包装层统一断言，映射逐条对齐 REST（集成测试断言，见 §1.29）      |
 | MCP 是否教怎么用                                    | 是：`instructions` + `localehub://import-guide` + `import-localization-files` 提示词 + 字段级描述（见 §1.30） |
+| 仓库有、平台没有的语言                              | 自动新增并报告；等价标签归入已有语言（`zh-Hans` → `zh-CN`）；歧义则拒绝（见 §1.31） |
 | MCP 写入是否进审计                                  | 是：7 个写工具写 `audit_logs`，`actor_type='mcp'`，只读与 dry-run 不写（集成测试断言，见 §1.28） |
 | `mark_applied` 闭环（容器栈实测）                   | 通过：pending → dry-run（不建 session）→ 确认（建 session）→ 平台不再下发 → 审计有 `sync.apply` |
 | 只带 `project.read` 的 Token 调 `import_translations` | 被拒（`SCOPE_INSUFFICIENT`）——修复前实测可写库，见 §1.29                                    |

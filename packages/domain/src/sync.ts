@@ -10,6 +10,7 @@ import {
   type LocalEntrySnapshot,
   type PlatformChange,
   type PlatformName,
+  type ProjectShapeExpansion,
   type PushChangeAccepted,
   type PushResult,
   type RemoteEntrySnapshot,
@@ -23,6 +24,7 @@ import {
 } from '@localehub/contracts';
 import { buildSyncPlan, computeSyncDiff, isPushAction, resolveConflictValue, type BuiltPlan } from '@localehub/sync-engine';
 import { TenantPrisma } from '@localehub/database';
+import { localeDisplayName, resolveLocaleTag } from '@localehub/contracts';
 import { emitProjectEvent, getProjectRevision } from './events';
 import {
   ensureTranslationKey,
@@ -160,10 +162,24 @@ export class SyncService {
     projectId: string,
     payload: ScanBatchPayload,
     actor: SyncActor,
-  ): Promise<{ scanId: string; connectionId: string; entryCount: number; fileCount: number }> {
+  ): Promise<{ scanId: string; connectionId: string; entryCount: number; fileCount: number; expansion: ProjectShapeExpansion }> {
     return this.tenant.withOrganization(actor.organizationId, async (tx) => {
       const project = await tx.project.findUnique({ where: { id: projectId }, select: { id: true, sourceLocale: true } });
       if (!project) throw new LocaleHubError(ErrorCode.NOT_FOUND, `Project ${projectId} not found`, 404);
+
+      // A repository is the authority on which languages it holds, so an unknown one is added
+      // rather than refused — and an equivalent one is matched rather than duplicated. Everything
+      // downstream (the scan record, the baselines, future pushes) then works in project terms.
+      const { expansion, resolve } = await this.expandProjectShape(tx, {
+        organizationId: actor.organizationId,
+        projectId,
+        sourceLocale: project.sourceLocale,
+        locales: [...payload.files.map((file) => file.locale), ...payload.entries.map((entry) => entry.locale)],
+        platforms: payload.files.map((file) => file.platform),
+        dryRun: false,
+      });
+      const files = payload.files.map((file) => ({ ...file, locale: resolve(file.locale) }));
+      const entries = payload.entries.map((entry) => ({ ...entry, locale: resolve(entry.locale) }));
 
       const connectionId = await this.ensureConnection(tx, {
         organizationId: actor.organizationId,
@@ -184,18 +200,18 @@ export class SyncService {
           clientVersion: payload.client?.version ?? null,
           gitBranch: payload.client?.gitBranch ?? null,
           gitCommit: payload.client?.gitCommit ?? null,
-          fileCount: payload.files.length,
-          entryCount: payload.entries.length,
-          files: payload.files as unknown as Prisma.InputJsonValue,
-          entries: payload.entries as unknown as Prisma.InputJsonValue,
+          fileCount: files.length,
+          entryCount: entries.length,
+          files: files as unknown as Prisma.InputJsonValue,
+          entries: entries as unknown as Prisma.InputJsonValue,
           expiresAt,
         },
         update: {
           connectionId,
-          fileCount: payload.files.length,
-          entryCount: payload.entries.length,
-          files: payload.files as unknown as Prisma.InputJsonValue,
-          entries: payload.entries as unknown as Prisma.InputJsonValue,
+          fileCount: files.length,
+          entryCount: entries.length,
+          files: files as unknown as Prisma.InputJsonValue,
+          entries: entries as unknown as Prisma.InputJsonValue,
           gitBranch: payload.client?.gitBranch ?? null,
           gitCommit: payload.client?.gitCommit ?? null,
           expiresAt,
@@ -203,7 +219,7 @@ export class SyncService {
       });
 
       // keep the file mapping registry in sync with what the client actually scanned
-      for (const file of payload.files) {
+      for (const file of files) {
         await tx.repositoryFileMapping.upsert({
           where: { connectionId_fileSetId: { connectionId, fileSetId: file.fileId } },
           create: {
@@ -220,7 +236,7 @@ export class SyncService {
         });
       }
 
-      return { scanId: payload.scanId, connectionId, entryCount: payload.entries.length, fileCount: payload.files.length };
+      return { scanId: payload.scanId, connectionId, entryCount: entries.length, fileCount: files.length, expansion };
     });
   }
 
@@ -866,6 +882,118 @@ export class SyncService {
     return key?.id ?? null;
   }
 
+  /**
+   * Add whatever the caller has that the project does not.
+   *
+   * Three outcomes, and only one of them is "do nothing": an exact code is already there, an
+   * equivalent tag resolves to the existing code (`zh-Hans` → `zh-CN`), or the language is new and
+   * gets created. The third used to happen silently and the second did not happen at all — which
+   * meant an iOS checkout whose source directory is `zh-Hans.lproj` produced a second Chinese
+   * locale that was not the source, so the import created no source versions and the project ended
+   * up with translated text and no reference to translate from.
+   *
+   * Ambiguity is refused instead of guessed: a bare `zh` against a project holding both `zh-CN`
+   * and `zh-TW` has no right answer, and filing text under the wrong language is silent and
+   * expensive to undo.
+   */
+  private async expandProjectShape(
+    tx: Prisma.TransactionClient,
+    params: {
+      organizationId: string;
+      projectId: string;
+      sourceLocale: string;
+      locales: string[];
+      platforms: PlatformName[];
+      dryRun: boolean;
+    },
+  ): Promise<{ expansion: ProjectShapeExpansion; resolve: (raw: string) => string }> {
+    const rows = await tx.locale.findMany({ where: { projectId: params.projectId }, select: { code: true } });
+    const known = rows.map((row) => row.code);
+    const expansion: ProjectShapeExpansion = { localesAdded: [], localesMatched: [], platformsAdded: [] };
+    const decided = new Map<string, string>();
+
+    const resolve = (raw: string): string => {
+      const cached = decided.get(raw);
+      if (cached) return cached;
+      const resolution = resolveLocaleTag(raw, known);
+      if (resolution.reason === 'ambiguous') {
+        throw new LocaleHubError(
+          ErrorCode.INVALID_LOCALE,
+          `Cannot tell which language "${raw}" means: this project already has ${resolution.candidates!.join(' and ')}. ` +
+            'Pass the exact code you want.',
+          409,
+          { incoming: raw, candidates: resolution.candidates },
+        );
+      }
+      if (resolution.reason === 'new') {
+        known.push(resolution.code);
+        expansion.localesAdded.push(resolution.code);
+      } else if (resolution.code !== raw) {
+        expansion.localesMatched.push({ from: raw, to: resolution.code });
+      }
+      decided.set(raw, resolution.code);
+      return resolution.code;
+    };
+
+    // Resolve before creating: the caller passes every file and entry locale through `resolve`, and
+    // the rows can only be written once that has run.
+    for (const code of params.locales) resolve(code);
+
+    // Computed for the dry run as well: a preview that omits half the expansion answers a
+    // question the caller did not ask. Only the writes are conditional.
+    const existingPlatforms = await tx.projectPlatform.findMany({
+      where: { projectId: params.projectId },
+      select: { platform: true },
+    });
+    for (const platform of new Set(params.platforms)) {
+      if (existingPlatforms.some((row) => row.platform === platform)) continue;
+      expansion.platformsAdded.push(platform);
+      if (params.dryRun) continue;
+      await tx.projectPlatform.create({
+        data: { organizationId: params.organizationId, projectId: params.projectId, platform: platform as never },
+      });
+    }
+
+    if (!params.dryRun) {
+      for (const code of expansion.localesAdded) {
+        await tx.locale.create({
+          data: {
+            organizationId: params.organizationId,
+            projectId: params.projectId,
+            code,
+            name: localeDisplayName(code),
+            isSource: code === params.sourceLocale,
+          },
+        });
+      }
+    }
+
+    return { expansion, resolve };
+  }
+
+  /**
+   * What an ingest *would* add, for a dry run. Reads only.
+   *
+   * A dry run that hides the expansion is worse than no dry run: "nothing was written" would be
+   * true and useless, because the caller's real question is what the project will look like after.
+   */
+  async previewShapeExpansion(
+    params: { projectId: string; locales: string[]; platforms: PlatformName[] },
+    actor: SyncActor,
+  ): Promise<ProjectShapeExpansion> {
+    return this.tenant.withOrganization(actor.organizationId, async (tx) => {
+      const { expansion } = await this.expandProjectShape(tx, {
+        organizationId: actor.organizationId,
+        projectId: params.projectId,
+        sourceLocale: '',
+        locales: params.locales,
+        platforms: params.platforms,
+        dryRun: true,
+      });
+      return expansion;
+    });
+  }
+
   private async ensureLocale(
     tx: Prisma.TransactionClient,
     params: { organizationId: string; projectId: string; code: string; isSource: boolean },
@@ -880,7 +1008,7 @@ export class SyncService {
         organizationId: params.organizationId,
         projectId: params.projectId,
         code: params.code,
-        name: params.code,
+        name: localeDisplayName(params.code),
         isSource: params.isSource,
       },
       select: { id: true },

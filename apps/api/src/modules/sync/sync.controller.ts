@@ -121,7 +121,16 @@ export class SyncController {
       resourceId: body.scanId,
       projectId: body.projectId,
       repositoryConnectionId: result.connectionId,
-      metadata: { files: result.fileCount, entries: result.entryCount, gitCommit: body.client?.gitCommit },
+      metadata: {
+        files: result.fileCount,
+        entries: result.entryCount,
+        gitCommit: body.client?.gitCommit,
+        // A first scan legitimately grows the project's locale list. Recording it here is what
+        // makes "where did zh-Hant come from" answerable.
+        localesAdded: result.expansion.localesAdded,
+        localesMatched: result.expansion.localesMatched,
+        platformsAdded: result.expansion.platformsAdded,
+      },
     });
     return result;
   }

@@ -72,8 +72,10 @@ describe('server instructions', () => {
     const client = await connect();
     try {
       const instructions = client.getInstructions() ?? '';
-      expect(instructions).toContain('sourceLocale');
+      // The repository's own directory name is what to pass — not a code the caller has to guess at.
       expect(instructions).toContain('zh-Hans');
+      expect(instructions).toContain('归入');
+      expect(instructions).toContain('自动新增');
       expect(instructions).toContain('platform 默认是 web');
       expect(instructions).toContain('300~400');
       expect(instructions).toContain('localehub://import-guide');
@@ -127,16 +129,20 @@ describe('the import guide', () => {
     }
   });
 
-  it('warns that locale codes and platforms are part of a key, and cannot be fixed later', async () => {
+  it('explains what happens to a locale the project does not have', async () => {
     const client = await connect();
     try {
       const text = textOf(await client.readResource({ uri: 'localehub://import-guide' }));
+      // The four outcomes, each of which the caller has to be able to predict.
       expect(text).toContain('zh-Hans');
       expect(text).toContain('zh-CN');
+      expect(text).toContain('localesMatched');
+      expect(text).toContain('localesAdded');
+      expect(text).toContain('platformsAdded');
+      expect(text).toContain('拒绝');
+      // Why it matters: getting this wrong once cost the source versions.
       expect(text).toContain('source version');
       expect(text).toContain('namespace');
-      // The two things no tool can change afterwards, so they have to be decided first.
-      expect(text).toContain('sourceLocale');
     } finally {
       await client.close();
     }
@@ -191,7 +197,11 @@ describe('tool schemas teach the arguments', () => {
       // These three are exactly what probing cannot reveal, because they are not required.
       expect(file.platform!.default).toBe('web');
       expect(file.platform!.description).toContain('ios');
-      expect(file.locale!.description).toContain('sourceLocale');
+      // A default the caller cannot see is the whole failure mode this test exists for, so the
+      // description has to say both what the default is and when it is wrong.
+      expect(file.platform!.description).toContain('自动加上');
+      expect(file.locale!.description).toContain('zh-Hans');
+      expect(file.locale!.description).toContain('自动新增');
       expect(file.namespace!.description).toContain('Localizable');
       expect(schema.properties.confirm!.default).toBe(false);
       expect(schema.properties.confirm!.description).toContain('dry run');

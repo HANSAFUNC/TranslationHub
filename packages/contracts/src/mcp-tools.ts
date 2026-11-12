@@ -76,7 +76,7 @@ export const remoteToolSchemas = {
   create_project: z.object({
     name: z.string().min(1).max(120).describe('项目名'),
     source_locale: localeTagSchema.describe(
-      '源语言。必填且此后无法修改：平台没有改 sourceLocale 的工具。语言文件里的语言必须与它逐字符相同才会被当作源文（zh-Hans 与 zh-CN 不同）。',
+      '源语言。必填且此后无法修改：平台没有改 sourceLocale 的工具。选错只能重建项目——所以先确认仓库里的源语言目录叫什么，再决定用哪个标签。',
     ),
     locales: z
       .array(localeTagSchema)
@@ -104,12 +104,12 @@ export const remoteToolSchemas = {
         z.object({
           path: z.string().min(1).describe('仓库里的相对路径，仅作标识，不参与 key 身份'),
           locale: localeTagSchema.describe(
-            '该文件的语言。必须与项目里的 locale 代码逐字符相同，源语言文件还必须等于项目 sourceLocale——平台不做 zh-Hans ↔ zh-CN 之类的等价映射，传错会导致一条 source version 都不生成。',
+            '该文件的语言，按仓库里的实际目录填（zh-Hans.lproj 就传 zh-Hans）。等价标签会归入项目已有的语言（zh-Hans → zh-CN、en → en-US），项目没有的会自动新增，两者都会在返回值的 expansion 里报告；只有无法判断时（项目同时有 zh-CN 和 zh-TW 而来的是 zh）才会拒绝。',
           ),
           platform: platformSchema
             .default('web')
             .describe(
-              "该文件的端。默认是 web：iOS 请传 'ios'，Android 传 'android'，多端共用文案传 'universal'。platform 是 key 身份的一部分，必须与 .localehub/config.yaml 里映射的 platform 一致。",
+              "该文件的端。默认是 web：iOS 请传 'ios'，Android 传 'android'，多端共用文案传 'universal'。platform 是 key 身份的一部分，必须与 .localehub/config.yaml 里映射的 platform 一致；项目没声明这个端时会自动加上。",
             ),
           namespace: z
             .string()

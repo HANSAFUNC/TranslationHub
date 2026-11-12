@@ -4,6 +4,7 @@ import {
   type ApiResponse,
   type ConflictRecord,
   type PlatformChange,
+  type ProjectShapeExpansion,
   type PushResult,
   type ScanBatchPayload,
   type SyncBaselineSnapshot,
@@ -214,7 +215,16 @@ export class ApiClient {
 
   /* ------------------------------------------------------------------- sync */
 
-  uploadScan(payload: ScanBatchPayload): Promise<{ scanId: string; connectionId: string; entryCount: number; fileCount: number }> {
+  uploadScan(
+    payload: ScanBatchPayload,
+  ): Promise<{
+    scanId: string;
+    connectionId: string;
+    entryCount: number;
+    fileCount: number;
+    /** Languages and platforms the platform added because the repository had them. */
+    expansion?: ProjectShapeExpansion;
+  }> {
     return this.request('POST', '/sync/scans', payload);
   }
 

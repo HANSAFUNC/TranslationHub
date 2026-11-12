@@ -29,6 +29,7 @@ import {
   REMOTE_MCP_IMPORT_GUIDE,
   REMOTE_MCP_TOOL_SCOPES,
   remoteImportPrompt,
+  resolveLocaleTag,
   type RemoteMcpTool,
 } from '@localehub/contracts';
 import { assertProjectBound, assertRole, assertScope, type ActorContext } from '@localehub/permissions';
@@ -241,8 +242,9 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     'import_translations',
     '把本地语言文件的内容导入项目（建立 Key、源文版本与译文）。是你读文件、平台收内容：平台看不到你的磁盘。' +
       '入参：{project_id, confirm, files:[{path, locale, platform, namespace?, entries:[{key,value}]}]}。' +
-      'locale 必须与项目 sourceLocale 逐字符相同（zh-Hans ≠ zh-CN）；platform 默认 web，iOS 要传 ios；' +
-      '多张字符串表用 namespace 区分。整个导入在一个 5 秒事务里，单次只放 300~400 条，超时整批回滚。' +
+      'locale 按仓库实际目录填（zh-Hans.lproj 就传 zh-Hans）：等价标签归入已有语言、项目没有的自动新增，' +
+      '两者都在返回值的 expansion 里报告。platform 默认 web，iOS 要传 ios；多张字符串表用 namespace 区分。' +
+      '整个导入在一个 5 秒事务里，单次只放 300~400 条，超时整批回滚。' +
       '默认 confirm=false 只报告不写入。细节见资源 localehub://import-guide。',
     async (input: {
       project_id: string;
@@ -258,20 +260,38 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
       if (!project) throw new LocaleHubError(ErrorCode.NOT_FOUND, `Project ${input.project_id} not found`, 404);
 
       const entryCount = input.files.reduce((total, file) => total + file.entries.length, 0);
+      // Both the report and the write work in project terms, so `planned` resolves the caller's
+      // tags the same way `recordScan` will: a `zh-Hans.lproj` directory in a project whose source
+      // locale is `zh-CN` is shown as `zh-CN` and as source, because that is what it is.
+      const existingCodes = await tenant.withOrganization(actor.organizationId, (tx) =>
+        tx.locale.findMany({ where: { projectId: project.id }, select: { code: true } }),
+      );
+      const resolvePlanned = (raw: string) => resolveLocaleTag(raw, existingCodes.map((row) => row.code)).code;
       const planned = input.files.map((file) => ({
         path: file.path,
-        locale: file.locale,
+        locale: resolvePlanned(file.locale),
         entries: file.entries.length,
-        isSource: file.locale === project.sourceLocale,
+        isSource: resolvePlanned(file.locale) === project.sourceLocale,
       }));
 
-      // Dry run by default, like every other write in this codebase.
+      // Dry run by default, like every other write in this codebase. It reports the expansion too:
+      // "nothing was written" is true and useless on its own when the caller's real question is
+      // whether their `zh-Hans` files are going to become a second Chinese locale.
       if (!input.confirm) {
+        const expansion = await sync.previewShapeExpansion(
+          {
+            projectId: project.id,
+            locales: input.files.map((file) => file.locale),
+            platforms: input.files.map((file) => file.platform as never),
+          },
+          actor,
+        );
         return {
           dryRun: true,
           project: { id: project.id, name: project.name, sourceLocale: project.sourceLocale },
           files: planned,
           entryCount,
+          expansion,
           note: 'Nothing was written. Call again with confirm=true to import.',
         };
       }
@@ -298,6 +318,8 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
             namespace: file.namespace ?? '',
             locale: file.locale,
             value: entry.value,
+            // The scan's own copy of this flag is informational; the push re-derives source from
+            // `identity.locale === project.sourceLocale` after `recordScan` normalises the locale.
             isSource: file.locale === project.sourceLocale,
             contentHash: contentHash(entry.value),
             fileId: `${file.platform}-${file.locale}`,
@@ -332,7 +354,15 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
         resourceId: pushed.syncSessionId,
         projectId: project.id,
         syncSessionId: pushed.syncSessionId,
-        metadata: { via: 'import_translations', entryCount, files: planned, summary: pushed.summary },
+        metadata: {
+          via: 'import_translations',
+          entryCount,
+          files: planned,
+          summary: pushed.summary,
+          localesAdded: scan.expansion.localesAdded,
+          localesMatched: scan.expansion.localesMatched,
+          platformsAdded: scan.expansion.platformsAdded,
+        },
       });
 
       return {
@@ -340,6 +370,9 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
         project: { id: project.id, name: project.name, sourceLocale: project.sourceLocale },
         files: planned,
         entryCount,
+        // Which languages this import added to the project, and which of the caller's tags were
+        // matched to one it already had. Without this the expansion is invisible.
+        expansion: scan.expansion,
         result: { revision: pushed.revision, summary: pushed.summary },
       };
     },

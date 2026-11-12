@@ -303,6 +303,34 @@ Token 推得上去、落不下来——这正是规格要的分离。
 并且说明重复导入是幂等的（未改动的值判 `changed:false`，不产生重复版本）。一万条 key 约 30 次调用，不优雅，
 但这是当前实现的真实上限。
 
+### 2.9 仓库有、平台没有的语言：自动扩充
+
+项目已有的语言是既有事实，仓库自己有哪些语言同样是既有事实。所以导入时以仓库为准：
+
+| 情况 | 平台怎么做 |
+| --- | --- |
+| 完全相同 | 直接用 |
+| 等价标签（项目 `zh-CN`，仓库 `zh-Hans`；项目 `en-US`，仓库 `en`） | 归入已有的那个，报告在 `expansion.localesMatched` |
+| 项目没有（仓库多了 `ko.lproj`） | **自动新增**，带可读名字（`한국어`），报告在 `expansion.localesAdded` |
+| 无法判断（项目同时有 `zh-CN` 和 `zh-TW`，来的是 `zh`） | **拒绝**并列出候选，要求传确切代码 |
+
+平台（端）同理：项目只声明了 `web`，仓库来了 `ios` 的内容，就自动加上，报告在 `expansion.platformsAdded`。
+
+**等价判断只在脚本与地区真正互替时成立**（`zh-Hans` ↔ `zh-CN`、`zh-Hant` ↔ `zh-TW`），或标签是光秃秃的语言
+（`ja` 对上唯一的 `ja-JP`）。它**不会**把 `zh-Hant` 认成 `zh-CN`——那会把繁体文本归到简体下。
+
+**为什么不能含糊。** 源文是靠 `locale === sourceLocale` 认出来的。在这一条之前，一个 iOS 仓库
+（源目录是 `zh-Hans.lproj`）配一个 `zh-CN` 的项目，导入会**新建一个 zh-Hans 语言**，而且因为代码不再等于
+`sourceLocale`，这批内容根本不算源文：**一条 source version 都不会生成**，译文全部
+`basedOnSourceVersionId = null`。项目变成「有译文、没有原文」，占位符校验、源文变更标 stale、AI 翻译都没了
+参照物——全程不报错。
+
+**dry run 也会报。** 「什么都没写」在调用方真正想知道「这次导入会让项目变成什么样」时是没用的，所以
+`confirm=false` 同样返回 `expansion`。
+
+**痕迹留在三处**：返回值、`sync.push` 审计行（`localesAdded` / `localesMatched` / `platformsAdded`），以及
+CLI 的 `localehub scan` 输出（`expanded` 字段直接给中文说明）。「这个 zh-Hant 是哪来的」因此有答案。
+
 ## 3. 本地仓库操作：CLI（不是 MCP）
 
 读写开发者仓库的 14 个动作都在 CLI 里，`localehub <command>`。它们与 MCP 无关，也不需要

@@ -25,10 +25,11 @@ export const REMOTE_MCP_INSTRUCTIONS = [
   '· 仓库 → 平台：import_translations（首次导入）、CLI 的 sync push（日常）。',
   '· 平台 → 仓库：get_pending_platform_changes 读出已审核译文 → 你写进文件 → mark_applied 回报。',
   '',
-  '上传（import_translations）前必读 localehub://import-guide。三条最容易出错、且事后难改的规则：',
-  '· locale 必须与项目 sourceLocale 逐字符相同（zh-Hans 与 zh-CN 是两个语言，平台不做等价映射）；',
-  '· platform 默认是 web，iOS 必须显式传 ios，且要与仓库配置里的 platform 一致；',
-  '· 一次调用只放 300~400 条：整个导入在一个 5 秒的事务里（实测 400 条通过、1000 条超时），超时会整批回滚。',
+  '上传（import_translations）前必读 localehub://import-guide。三条最容易出错的规则：',
+  '· locale 按仓库实际目录填（zh-Hans.lproj 就传 zh-Hans）：等价的标签会归入项目已有的语言（zh-Hans → zh-CN、en → en-US），',
+  '  项目没有的语言会自动新增并在返回值与审计里报告；只有「项目同时有 zh-CN 和 zh-TW，来的却是 zh」这种无法判断的情况才会被拒；',
+  '· platform 默认是 web，iOS 必须显式传 ios，且要与仓库配置里的 platform 一致；项目没有这个端也会自动加上；',
+  '· 一次调用只放 300~400 条，整个导入在一个 5 秒的事务里（实测 400 条通过、1000 条超时），超时会整批回滚。',
   '',
   '所有写操作默认 dry run（confirm/dry_run 缺省为 false）：先看不写，确认后再落库。',
   'AI 生成的译文一律是草稿；审核与发布必须由具备权限的人类完成，Agent 的批准会被拒绝——这是设计。',
@@ -69,15 +70,26 @@ export const REMOTE_MCP_IMPORT_GUIDE = `# 把本地语言文件上传到平台
 
 ## 2. 三条事后难改的规则
 
-**locale 必须与项目 sourceLocale 逐字符相同。** 平台不做 \`zh-Hans\` ↔ \`zh-CN\` 这类等价映射。判断源文的代码是
-严格字符串相等：源语言文件传错标签，它就不被当作源文，于是**一条 source version 都不会生成**，译文全部
-\`basedOnSourceVersionId = null\`——项目会变成「有译文、没有原文」，之后占位符校验、源文变更标 stale、
-AI 翻译都没有参照物。先调 \`list_project_locales\` 拿到确切代码，不要猜。
+**locale 填仓库里的实际目录名，平台会自己对齐。** 项目是权威项目已有的语言，仓库是权威它自己有哪些语言：
 
-**platform 决定 key 的身份。** key 的身份是 \`(项目, platform, namespace, key)\`。项目里这个字段要与
+| 情况 | 平台怎么做 |
+| --- | --- |
+| 完全相同（项目有 \`zh-CN\`，你来 \`zh-CN\`） | 直接用 |
+| 等价标签（项目有 \`zh-CN\`，你来 \`zh-Hans\`；项目有 \`en-US\`，你来 \`en\`） | 归入已有的那个，并在返回值 \`expansion.localesMatched\` 里报告 |
+| 项目没有（项目只有 \`en-US\`，你来 \`fr-FR\`） | **自动新增**，带可读名字（\`Français（France）\`），在 \`expansion.localesAdded\` 里报告 |
+| 无法判断（项目同时有 \`zh-CN\` 和 \`zh-TW\`，你来 \`zh\`） | **拒绝**并列出候选，要求传确切代码——猜错会把文本归到错误的语言下，且很难回头 |
+
+等价判断只在脚本与地区真正互替时成立（\`zh-Hans\` ↔ \`zh-CN\`、\`zh-Hant\` ↔ \`zh-TW\`），或标签是光秃秃的语言
+（\`ja\` 对上唯一的 \`ja-JP\`）。它**不会**把 \`zh-Hant\` 认成 \`zh-CN\`。
+
+为什么这件事重要：源文是靠 \`locale === sourceLocale\` 认出来的。以前 \`zh-Hans\` 不被认成 \`zh-CN\`，于是
+**一条 source version 都不生成**，译文全部 \`basedOnSourceVersionId = null\`——项目变成「有译文、没有原文」，
+占位符校验、源文变更标 stale、AI 翻译都没有参照物。
+
+**platform 决定 key 的身份。** key 的身份是 \`(项目, platform, namespace, key)\`。要与
 \`.localehub/config.yaml\` 里文件映射的 \`platform\` 一致：导入成 \`web\`、之后用 \`ios\` 扫同一批文件，平台会认为是
 两套不相干的 key，表现为「一批新 key + 一批待归档」，不报错。iOS 用 \`ios\`，Android 用 \`android\`，
-多端共用一份文案用 \`universal\`。
+多端共用一份文案用 \`universal\`。项目没有这个端时也会自动加上，并在 \`expansion.platformsAdded\` 里报告。
 
 **多张字符串表要用 namespace 分开。** key 的身份里**没有文件路径**。iOS 的 \`Localizable\` / \`InfoPlist\` /
 \`LaunchScreen\` 是三张独立的表，都用默认空 namespace 导入就是拍平成一个 key 空间，同名 key 互相覆盖（后写的赢，
@@ -106,7 +118,9 @@ AI 翻译都没有参照物。先调 \`list_project_locales\` 拿到确切代码
 1. \`get_project\` + \`list_project_locales\` —— 拿到 sourceLocale 与已有语言代码，**不要猜**。
 2. 若 platform 不对（例如项目建成了 \`web\` 但内容是 iOS），先处理它：平台上没有任何工具能改
    \`sourceLocale\`，也没有工具能给项目加 platform；项目还是空的时候重建最便宜。\`create_project\` 接受 \`platforms\`。
-3. 每个文件先 \`confirm: false\` 跑一次 dry run，核对返回的 \`files[].isSource\` 与 \`entryCount\`。
+3. 每个文件先 \`confirm: false\` 跑一次 dry run：核对 \`files[].isSource\`（源文判定按**归入之后**的代码算）、
+   \`entryCount\`，以及 \`expansion\`——它会告诉你这次导入会新增哪些语言、把哪些标签归入已有语言、新增哪个端。
+   dry run 只回答不写。
 4. 分批 \`confirm: true\` 导入，从源语言文件开始。
 5. 全部导入后 \`get_project\` 看 counts，再用 \`get_qa_issues\` 跑一遍。
 6. 平台 → 仓库方向：\`get_pending_platform_changes\` → 写文件 → \`mark_applied\`（需要 \`translation.apply\` scope）。

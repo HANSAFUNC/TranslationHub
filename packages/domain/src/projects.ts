@@ -1,4 +1,4 @@
-import { ErrorCode, LocaleHubError, canonicalizeLocaleTag, isValidLocaleTag } from '@localehub/contracts';
+import { ErrorCode, LocaleHubError, canonicalizeLocaleTag, isValidLocaleTag, localeDisplayName } from '@localehub/contracts';
 import type { Prisma, PrismaClient } from '@localehub/database';
 
 /**
@@ -86,7 +86,9 @@ export async function createProject(
         organizationId: input.organizationId,
         projectId: project.id,
         code,
-        name: code,
+        // Named, not echoed: a project created through any surface should read `日本語（日本）`,
+        // not `ja-JP`, and a locale added later by an import gets the same treatment.
+        name: localeDisplayName(code),
         isSource: code === project.sourceLocale,
       },
     });
