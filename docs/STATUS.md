@@ -738,7 +738,7 @@ REST 视图一致 → 审计有 `sync.apply` 且带 `via: mark_applied` 与 comm
 | --- | --- |
 | 代码相同 | 直接用 |
 | 等价标签 | 归入项目已有的那个（`zh-Hans` → `zh-CN`、`zh-Hant` → `zh-TW`、`en` → `en-US`、`ja` → `ja-JP`） |
-| 项目没有 | 新建语言行，名字用可读名（`localeDisplayName`：`中文（中国）`、`Français（France）`、`한국어`） |
+| 项目没有 | 新建语言行，名字用中文可读名（`localeDisplayName`：`简体中文（中国）`、`法语（法国）`、`韩语`） |
 | 无法判断 | **拒绝**：项目同时有 `zh-CN` 和 `zh-TW` 而来的是 `zh`，返回 409 `INVALID_LOCALE` 并列出候选 |
 
 platform 同样处理：项目只声明 `web`，内容来了 `ios`，就自动加上 `project_platforms`。
@@ -777,8 +777,10 @@ config 里的这类标签会以一个没人看得懂的错误失败。现在按�
 - 目标语言是多选（`multiple` 模式），源语言单选；
 - 选源语言时会自动把它从目标语言里去掉——同一个语言在表单里出现两次读起来像错误。
 
-`localeLabel` 只在**有区分意义时**加地区：整个目录里只有一种韩语，就显示 `한국어`；英语有六种，
-必须显示 `English · US` 与 `English · GB`，否则两行一模一样，选择变成猜测。
+`localeLabel` 输出**中文**标签（产品是中文的，`한국어` 或 `· FR` 不是中文读者能扫的标签），并只在**有区分
+意义时**加地区：整个目录里只有一种韩语，就显示 `韩语`；英语有六种，必须显示 `英语（美国）` 与 `英语（英国）`，
+否则两行一模一样，选择变成猜测。语言自己的名字（`한국어`）退到下拉项的第二行，翻译看得懂它。搜中文名也能搜到
+（输 `韩语` 出 `ko-KR`，输 `繁体` 出三种繁体中文）。
 
 **项目设置页**（`/projects/[projectId]`）：
 
@@ -786,7 +788,7 @@ config 里的这类标签会以一个没人看得懂的错误失败。现在按�
 | --- | --- |
 | 改名称 / 描述 | 直接保存 |
 | 改平台（多选） | 作为**集合**整体提交（`PATCH /projects/:id { platforms }`），表单一次保存 |
-| 加语言 | `POST /projects/:id/locales`，名字自动用目录里的可读名（`한국어`） |
+| 加语言 | `POST /projects/:id/locales`，名字自动用目录里的中文名（`韩语`） |
 | 删语言 | `DELETE /projects/:id/locales/:code`，源语言不可删 |
 | 改源语言 | 只在项目**还没有任何译文**时允许 |
 
@@ -800,6 +802,14 @@ config 里的这类标签会以一个没人看得懂的错误失败。现在按�
    两个 locale 的 `isSource` 互换）。
 
 平台同样有保护：不能删到最后一个（项目没有端就无处放 Key），有 Key 的端不能删（`DELETE .../platforms/:platform`）。
+
+**语言标签改中文**（同一轮追加）：目录原本用语言自己的名字做标签（`한국어`、`Français · FR`、`አማርኛ`），
+那在语言切换器上是对的，在一个中文后台里是错的——选语言的人得先认出一种自己可能不认识的文字，而 `· FR` 是地区码
+不是词。现在 `localeLabel` 输出中文（`韩语`、`英语（美国）`、`简体中文（中国）`），母语名退到下拉项第二行
+（翻译看得懂它），搜索同时匹配中文名、母语名、英文名与代码——输 `韩语` 出 `ko-KR`，输 `繁体` 出三种繁体中文。
+新增的 `LANGUAGE_ZH` / `REGION_ZH` / `SCRIPT_ZH` 三张表也被 `localeDisplayName` 的兜底路径复用，
+所以目录内外的措辞不会分叉。`zh-CN` 没有 script 子标签但就是简体，靠 `ZH_IMPLIED_SCRIPT` 补上，
+否则 `zh-CN` 与 `zh-TW` 会都显示成「中文」。
 
 **一个只在镜像里暴露的坑**：Web 改成 import `@localehub/contracts` 后，Docker 构建失败两次——
 先是 `web.Dockerfile` 只拷贝了 contracts 的**源码**、没跑它的 build（该包的入口是 `dist`）；补上构建后
@@ -909,7 +919,7 @@ POST /organization/members (READONLY)          # 无 token 管理成员的越权
 | GitHub Actions `CI`（main）                      | **通过**（Run 5）                       |
 | Local / Remote MCP 真实客户端握手                | 通过（见附二）                          |
 | 端到端演示连续两次运行                           | 均通过（demo 自带项目清理，可重复执行） |
-| `pnpm test`                                      | 215 passed                              |
+| `pnpm test`                                      | 217 passed                              |
 | `pnpm test:integration`                          | 129 passed                              |
 | `node apps/e2e-demo/dist/run-demo.js`            | ALL ACCEPTANCE CHECKS PASSED            |
 | `docker compose config`（含 production overlay） | valid                                   |

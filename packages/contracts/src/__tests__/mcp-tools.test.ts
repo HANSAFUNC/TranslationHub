@@ -105,13 +105,20 @@ describe('resolveLocaleTag', () => {
 });
 
 describe('localeDisplayName', () => {
-  it('names the languages a project is likely to grow', () => {
-    // The catalog is the source of these labels, so a translator sees the language's own name.
-    expect(localeDisplayName('zh-CN')).toBe('中文（简体） · CN');
-    expect(localeDisplayName('ja-JP')).toBe('日本語');
-    expect(localeDisplayName('fr-FR')).toBe('Français · FR');
+  it('names the languages in Chinese, because the product is', () => {
+    expect(localeDisplayName('zh-CN')).toBe('简体中文（中国）');
+    expect(localeDisplayName('zh-TW')).toBe('繁体中文（台湾）');
+    expect(localeDisplayName('ja-JP')).toBe('日语');
+    expect(localeDisplayName('ko-KR')).toBe('韩语');
+    expect(localeDisplayName('fr-FR')).toBe('法语（法国）');
     // The region is added only where it distinguishes: `en-US` and `en-GB` must not read alike.
-    expect(localeDisplayName('en-US')).not.toBe(localeDisplayName('en-GB'));
+    expect(localeDisplayName('en-US')).toBe('英语（美国）');
+    expect(localeDisplayName('en-GB')).toBe('英语（英国）');
+  });
+
+  it('falls back to the tag for a locale outside the catalog', () => {
+    // Better a code than a blank cell — the catalog is a convenience, not a constraint.
+    expect(localeDisplayName('haw-US')).toBe('haw-US');
   });
 
   it('does not label two locales of one language identically', () => {
@@ -120,9 +127,20 @@ describe('localeDisplayName', () => {
       const label = localeLabel(entry);
       const previous = seen.get(label);
       // Two entries may share a label only if they also share the language and its region — which
-      // is what `localeLabel` guards against by appending the region.
+      // is what `localeLabel` guards against by appending the region. In Chinese this is the check
+      // that catches `en-US` and `en-GB` both rendering as 英语.
       if (previous) expect(previous.split('-')[0]).not.toBe(entry.code.split('-')[0]);
       seen.set(label, entry.code);
+    }
+  });
+
+  it('labels every catalog entry in Chinese', () => {
+    for (const entry of COMMON_LOCALES) {
+      const label = localeLabel(entry);
+      expect(label, entry.code).not.toBe(entry.native);
+      // A CJK character, or a Latin name for a language Chinese has no word for — either way, not
+      // the language's own script.
+      expect(/[\u4e00-\u9fff]/.test(label) || /^[A-Za-z]/.test(label), `${entry.code} → ${label}`).toBe(true);
     }
   });
 

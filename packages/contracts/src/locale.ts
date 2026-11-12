@@ -1,4 +1,4 @@
-import { findCatalogLocale, localeLabel } from './locale-catalog';
+import { LANGUAGE_ZH, REGION_ZH, SCRIPT_ZH, findCatalogLocale, localeLabel } from './locale-catalog';
 
 /**
  * BCP-47 style language tag handling (spec §4.2 requires locale codes to be valid BCP 47).
@@ -117,48 +117,24 @@ export function resolveLocaleTag(incoming: string, existing: readonly string[]):
   return { code, reason: 'new' };
 }
 
-const LANGUAGE_NAMES: Record<string, string> = {
-  ar: 'العربية', bn: 'বাংলা', cs: 'Čeština', da: 'Dansk', de: 'Deutsch', el: 'Ελληνικά',
-  en: 'English', es: 'Español', fa: 'فارسی', fi: 'Suomi', fr: 'Français', he: 'עברית',
-  hi: 'हिन्दी', id: 'Bahasa Indonesia', it: 'Italiano', ja: '日本語', ko: '한국어', ms: 'Bahasa Melayu',
-  nb: 'Norsk Bokmål', nl: 'Nederlands', pl: 'Polski', pt: 'Português', ru: 'Русский', sv: 'Svenska',
-  ta: 'தமிழ்', th: 'ไทย', tr: 'Türkçe', uk: 'Українська', ur: 'اردو', vi: 'Tiếng Việt', zh: '中文',
-};
-
-const SCRIPT_NAMES: Record<string, string> = {
-  Arab: 'Arabic', Cyrl: 'Cyrillic', Hans: '简体', Hant: '繁體', Jpan: '日本語', Kore: '한국어', Latn: 'Latin',
-};
-
-const REGION_NAMES: Record<string, string> = {
-  AU: 'Australia', BR: 'Brasil', CA: 'Canada', CN: '中国', DE: 'Deutschland', ES: 'España',
-  FR: 'France', GB: 'United Kingdom', HK: '香港', IN: 'India', IT: 'Italia', JP: '日本',
-  KR: '대한민국', MX: 'México', MY: 'Malaysia', NL: 'Nederland', RU: 'Россия', SG: '新加坡',
-  TW: '台灣', US: 'United States',
-};
-
 /**
- * A human label for a locale the platform had to invent.
+ * The label for a locale the catalog does not have.
  *
- * A locale created by an import used to be named after its own code, so the project page showed
- * `zh-Hant` next to a hand-made `中文（繁體）`. Best effort and never authoritative: unrecognised
- * subtags fall back to the tag itself, which is still better than an empty cell.
+ * Reuses the catalog's Chinese maps so the two never disagree in wording, and falls back to the tag
+ * itself rather than to an empty cell.
  */
 export function localeDisplayName(tag: string): string {
   const code = canonicalizeLocaleTag(tag);
-  // The catalog knows the names people expect ("中文（简体）", "Português (Brasil)"); the fallback
-  // below covers everything else without pretending to a full CLDR table.
   const catalog = findCatalogLocale(code) ?? findCatalogLocale(code.toLowerCase());
   if (catalog) return localeLabel(catalog);
-  const parts = code.split('-');
-  const language = parts[0] ?? '';
-  const pieces = [LANGUAGE_NAMES[language] ?? code];
 
-  const script = parts.find((part) => SCRIPT_NAMES[part] !== undefined);
-  if (script) pieces.push(SCRIPT_NAMES[script]!);
-  const region = parts.find((part) => REGION_NAMES[part] !== undefined);
-  if (region) pieces.push(REGION_NAMES[region]!);
-
-  if (pieces.length === 1) return pieces[0]!;
-  const [base, ...rest] = pieces;
-  return `${base}（${rest.join('，')}）`;
+  const [language, ...rest] = code.split('-');
+  const base = LANGUAGE_ZH[language ?? ''] ?? code;
+  const script = rest.find((part) => SCRIPT_ZH[part] !== undefined);
+  const region = rest.find((part) => REGION_ZH[part] !== undefined);
+  const details = [script ? SCRIPT_ZH[script] : undefined, region ? REGION_ZH[region] : undefined].filter(
+    (part): part is string => Boolean(part),
+  );
+  if (base === code) return code;
+  return details.length ? `${base}（${details.join('，')}）` : base;
 }

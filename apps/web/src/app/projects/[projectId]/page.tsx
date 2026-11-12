@@ -239,7 +239,9 @@ export default function ProjectPage() {
                 {project?.locales.map((locale) => (
                   <TableRow key={locale.id}>
                     <TableCell className="font-mono text-xs">{locale.code}</TableCell>
-                    <TableCell>{locale.name}</TableCell>
+                    {/* The label is derived from the code, so a language created before the labels
+                        were translated (stored as `한국어`) reads the same as one created after. */}
+                    <TableCell>{localeDisplayName(locale.code) || locale.name}</TableCell>
                     <TableCell className="text-right">
                       <StatusBadge status={locale.isSource ? 'APPROVED' : 'PENDING'} className={locale.isSource ? '' : 'opacity-70'} />
                     </TableCell>

@@ -24,6 +24,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { timeAgo, useAsync } from '@/components/use-async';
 import { get, post, type TranslationDetail, type TranslationListItem } from '@/lib/api';
+import { localeDisplayName } from '@localehub/contracts/locale';
 import { cn } from '@/lib/utils';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'PENDING_REVIEW', 'APPROVED', 'STALE', 'REJECTED'] as const;
@@ -120,7 +121,9 @@ export default function TranslationsPage() {
                 <SelectItem value="ALL">全部语言</SelectItem>
                 {project?.locales.map((item) => (
                   <SelectItem key={item.code} value={item.code}>
-                    {item.code} {item.name !== item.code ? `· ${item.name}` : ''}
+                    {/* Derived from the code, so a locale created before the labels were translated
+                        reads the same as one created after. */}
+                    {item.code} · {localeDisplayName(item.code)}
                   </SelectItem>
                 ))}
               </SelectGroup>

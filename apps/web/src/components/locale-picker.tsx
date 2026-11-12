@@ -8,7 +8,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { COMMON_LOCALES, localeLabel, searchCatalogLocales, type LocaleCatalogEntry } from '@localehub/contracts/locale-catalog';
+import {
+  COMMON_LOCALES,
+  localeLabel,
+  localeNativeName,
+  searchCatalogLocales,
+  type LocaleCatalogEntry,
+} from '@localehub/contracts/locale-catalog';
 import { cn } from '@/lib/utils';
 
 /**
@@ -172,8 +178,13 @@ function LocaleOption({
       )}
     >
       <span className="flex min-w-0 flex-col">
+        {/* Chinese first: the product is Chinese, and `한국어` or `· FR` is not a label a Chinese
+            reader can scan. The language's own name is kept underneath, because a translator does
+            recognise it. */}
         <span className="truncate">{localeLabel(entry)}</span>
-        <span className="text-muted-foreground truncate text-xs">{entry.english}</span>
+        <span className="text-muted-foreground truncate text-xs">
+          {localeNativeName(entry)} · {entry.english}
+        </span>
       </span>
       <span className="flex shrink-0 items-center gap-2">
         <span className="text-muted-foreground font-mono text-xs">{entry.code}</span>
@@ -184,7 +195,10 @@ function LocaleOption({
 }
 
 function labelOf(code: string): string {
-  return COMMON_LOCALES.find((entry) => entry.code === code) ? localeLabel(COMMON_LOCALES.find((entry) => entry.code === code)!) : code;
+  const entry = COMMON_LOCALES.find((row) => row.code === code);
+  // Outside the catalog the code is the label; `localeDisplayName` covers that case, but importing
+  // it would pull the tag-comparison helpers in for one call.
+  return entry ? localeLabel(entry) : code;
 }
 
 /** Cheap shape check, so a stray "abc" does not become a locale but `haw-US` can. */

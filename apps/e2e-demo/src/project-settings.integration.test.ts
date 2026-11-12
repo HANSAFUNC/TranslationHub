@@ -108,8 +108,8 @@ describe('editing a project', () => {
     });
     expect(added.status, JSON.stringify(added.body.error)).toBe(201);
     expect(added.body.data?.code).toBe('ko-KR');
-    // A language added from the UI is named the way a translator expects, not by its code.
-    expect(added.body.data?.name).toBe('한국어');
+    // A language added from the UI is named the way the rest of the product is worded.
+    expect(added.body.data?.name).toBe('韩语');
 
     const detail = await call<ProjectDetail>(`/projects/${project.id}`, { token });
     expect(detail.body.data?.locales.map((locale) => locale.code).sort()).toEqual(['en-US', 'ko-KR']);

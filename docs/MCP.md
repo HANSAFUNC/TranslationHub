@@ -311,7 +311,7 @@ Token 推得上去、落不下来——这正是规格要的分离。
 | --- | --- |
 | 完全相同 | 直接用 |
 | 等价标签（项目 `zh-CN`，仓库 `zh-Hans`；项目 `en-US`，仓库 `en`） | 归入已有的那个，报告在 `expansion.localesMatched` |
-| 项目没有（仓库多了 `ko.lproj`） | **自动新增**，带可读名字（`한국어`），报告在 `expansion.localesAdded` |
+| 项目没有（仓库多了 `ko.lproj`） | **自动新增**，带中文可读名（`韩语`），报告在 `expansion.localesAdded` |
 | 无法判断（项目同时有 `zh-CN` 和 `zh-TW`，来的是 `zh`） | **拒绝**并列出候选，要求传确切代码 |
 
 平台（端）同理：项目只声明了 `web`，仓库来了 `ios` 的内容，就自动加上，报告在 `expansion.platformsAdded`。

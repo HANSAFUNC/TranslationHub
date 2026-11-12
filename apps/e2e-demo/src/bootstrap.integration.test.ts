@@ -747,8 +747,8 @@ describe('creating a project', () => {
       const french = locales.find((row) => row.code === 'fr-FR');
       expect(french).toBeTruthy();
       // A locale the platform invents is named after the language, not after its own code.
-      // Named from the shared catalog, so the web picker and the platform agree on the label.
-      expect(french?.name).toBe('Français · FR');
+      // Named from the shared catalog, in Chinese, so the web picker and the platform agree.
+      expect(french?.name).toBe('法语（法国）');
       expect(french?.isSource).toBe(false);
     });
 
