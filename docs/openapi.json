@@ -6739,6 +6739,9 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "partial": {
+                    "type": "boolean"
+                  },
                   "client": {
                     "type": "object",
                     "properties": {

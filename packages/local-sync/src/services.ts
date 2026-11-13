@@ -188,6 +188,9 @@ export class LocalSyncServices {
       fileSetIds: input.file_set_ids,
       scanId,
       client: this.clientInfo(),
+      // `--file-set` narrows the scan to part of the repository. Saying so keeps the platform from
+      // reading every excluded file as deleted.
+      partial: Boolean(input.file_set_ids?.length),
     });
 
     // Upload the scan so the platform can compute the three-way comparison.

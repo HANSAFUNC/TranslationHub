@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { contentHash, type ComparableEntry, type RemoteEntrySnapshot, type SyncBaselineSnapshot } from '@localehub/contracts';
 import { computeSyncDiff } from '../diff';
-import { buildSyncPlan, summarize } from '../plan';
+import { buildSyncPlan, sortEntries, summarize } from '../plan';
 
 const PROJECT = 'prj_test';
 
@@ -221,6 +221,21 @@ describe('three-way comparison (spec §7.2)', () => {
   });
 });
 
+/**
+ * The same items the plan would have carried before unchanged entries were dropped.
+ *
+ * Rebuilt from the diff rather than read back from the plan, because the plan is the thing under
+ * test — asking it what it left out would only prove it is self-consistent.
+ */
+function allItems(entries: Parameters<typeof buildSyncPlan>[0], options: Parameters<typeof buildSyncPlan>[1]) {
+  return sortEntries(entries).map((comparable) => ({
+    changeId: 'chg',
+    identity: comparable.identity,
+    action: computeSyncDiff(comparable, options).action,
+    diff: computeSyncDiff(comparable, options),
+  })) as Parameters<typeof summarize>[0];
+}
+
 describe('plan building', () => {
   const entries: ComparableEntry[] = [
     entry({ key: 'b.key', local: local('b.key', 'new'), remote: null, baseline: null }),
@@ -250,12 +265,19 @@ describe('plan building', () => {
     expect(changed.planHash).not.toBe(buildSyncPlan(entries, options).planHash);
   });
 
-  it('summarises actions', () => {
+  it('summarises actions, including the ones it does not carry as items', () => {
     const { payload } = buildSyncPlan(entries, options);
     expect(payload.summary.pushNew).toBe(1);
     expect(payload.summary.pushUpdated).toBe(1);
     expect(payload.summary.unchanged).toBe(1);
-    expect(summarize(payload.items)).toEqual(payload.summary);
+
+    // The summary describes the comparison; the items describe the work. An unchanged entry is
+    // counted but not carried: materialising one item per unchanged entry made the cost of a push
+    // proportional to the size of the project instead of the size of the change.
+    expect(payload.items.some((item) => item.action === 'SKIP')).toBe(false);
+    expect(payload.items).toHaveLength(entries.length - 1);
+    expect(summarize(payload.items)).not.toEqual(payload.summary);
+    expect(summarize(allItems(entries, options))).toEqual(payload.summary);
   });
 
   it('gives every item a stable change id', () => {

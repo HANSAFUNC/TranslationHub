@@ -302,6 +302,10 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
       const payload = {
         projectId: project.id,
         scanId,
+        // This call carries whichever files the agent chose to send, so it is a batch, never a
+        // statement that the rest of the repository is gone. Without this an import of one key
+        // into a 5,000-entry project proposed 5,000 archive candidates and blew the transaction.
+        partial: true,
         client: { name: 'localehub-remote-mcp', version: '0.1.0' },
         files: input.files.map((file) => ({
           fileId: `${file.platform}-${file.locale}`,
@@ -373,7 +377,16 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
         // Which languages this import added to the project, and which of the caller's tags were
         // matched to one it already had. Without this the expansion is invisible.
         expansion: scan.expansion,
-        result: { revision: pushed.revision, summary: pushed.summary },
+        result: {
+          revision: pushed.revision,
+          summary: {
+            ...pushed.summary,
+            // Entries identical on both sides never enter the plan — that is what keeps a push's
+            // cost proportional to the change. They are still the answer to "did my import do
+            // anything?", so the count comes from the comparison rather than from the push.
+            unchanged: preview.plan.summary.unchanged,
+          },
+        },
       };
     },
   );

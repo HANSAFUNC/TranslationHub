@@ -845,6 +845,105 @@ describe('creating a project', () => {
     });
   });
 
+  /**
+   * The plan carries the work, not the project.
+   *
+   * It used to carry one item per entry the project already had: `createPreview` seeded the
+   * comparison with every baseline of the connection, and `push` then wrote a `sync_items` row for
+   * each of them inside a single transaction. On a project with 5,480 entries that meant importing
+   * **one key** proposed 5,481 items and ran out of time, so every import failed regardless of how
+   * little it carried — the failure this test exists to keep from coming back.
+   */
+  describe('the cost of a push', () => {
+    it('grows with the change, not with the size of the project', async () => {
+      const created = await client!.callTool({
+        name: 'create_project',
+        arguments: { name: `Push cost ${runId}`, source_locale: 'en-US', locales: ['ja-JP'], platforms: ['web'] },
+      });
+      const projectId = payload<{ project: { id: string } }>(created).project.id;
+
+      const importEntries = async (entries: { key: string; value: string }[]) => {
+        const result = await client!.callTool({
+          name: 'import_translations',
+          arguments: {
+            project_id: projectId,
+            confirm: true,
+            files: [{ path: 'locales/en-US/cost.json', locale: 'en-US', platform: 'web', entries }],
+          },
+        });
+        expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
+        return payload<{ result: { summary: Record<string, number> } }>(result);
+      };
+
+      // A project with a few hundred entries: enough that a per-entry plan would be obvious.
+      const bulk = Array.from({ length: 300 }, (_, index) => ({ key: `cost.k${index}`, value: `v${index}` }));
+      const first = await importEntries(bulk);
+      expect(first.result.summary.created).toBe(300);
+
+      const sessionsAfterBulk = await call<{ id: string; status: string }[]>(
+        `/projects/${projectId}/sync/sessions`,
+        { token: session.token },
+      );
+      const bulkItems = await call<unknown[]>(
+        `/sync/sessions/${sessionsAfterBulk.body.data![0]!.id}/items`,
+        { token: session.token },
+      );
+      expect(bulkItems.body.data!.length).toBe(300);
+
+      // Now the case that used to fail: one entry, into a project that already holds 300.
+      await importEntries([{ key: 'cost.single', value: 'only one' }]);
+
+      const sessionsAfterOne = await call<{ id: string }[]>(`/projects/${projectId}/sync/sessions`, {
+        token: session.token,
+      });
+      const oneItems = await call<unknown[]>(`/sync/sessions/${sessionsAfterOne.body.data![0]!.id}/items`, {
+        token: session.token,
+      });
+
+      // One entry in, one item recorded — not one item per entry the project already had.
+      expect(oneItems.body.data!.length).toBe(1);
+    }, 120_000);
+
+    it('still counts the entries it does not carry', async () => {
+      const created = await client!.callTool({
+        name: 'create_project',
+        arguments: { name: `Unchanged count ${runId}`, source_locale: 'en-US', locales: ['ja-JP'], platforms: ['web'] },
+      });
+      const projectId = payload<{ project: { id: string } }>(created).project.id;
+
+      const entries = [
+        { key: 'count.a', value: 'A' },
+        { key: 'count.b', value: 'B' },
+      ];
+      await client!.callTool({
+        name: 'import_translations',
+        arguments: {
+          project_id: projectId,
+          confirm: true,
+          files: [{ path: 'locales/en-US/count.json', locale: 'en-US', platform: 'web', entries }],
+        },
+      });
+
+      // Re-importing the same two entries changes nothing, and the session says so rather than
+      // pretending it did two things.
+      const replay = await client!.callTool({
+        name: 'import_translations',
+        arguments: {
+          project_id: projectId,
+          confirm: true,
+          files: [{ path: 'locales/en-US/count.json', locale: 'en-US', platform: 'web', entries }],
+        },
+      });
+      expect(replay.isError, JSON.stringify(replay.content)).toBeFalsy();
+      const summary = payload<{ result: { summary: Record<string, number> } }>(replay).result.summary;
+      expect(summary.created).toBe(0);
+      expect(summary.updated).toBe(0);
+      // Nothing was written, and the caller is told why: both entries were already identical on
+      // both sides, so neither entered the plan at all.
+      expect(summary.unchanged).toBe(2);
+    }, 120_000);
+  });
+
   it('refuses a project the token is not bound to', async () => {
     const other = await call<{ id: string }>('/projects', {
       method: 'POST',

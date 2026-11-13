@@ -115,14 +115,16 @@ describe('the import guide', () => {
     }
   });
 
-  it('states the batching limit with the measurement behind it', async () => {
+  it('explains that a batch is a partial upload, and that cost scales with the batch', async () => {
     const client = await connect();
     try {
       const text = textOf(await client.readResource({ uri: 'localehub://import-guide' }));
-      // The number is measured, not guessed: 400 entries succeeded in ~3.2s, 1000 died at the
-      // 5000 ms interactive-transaction timeout.
-      expect(text).toContain('300~400');
-      expect(text).toContain('5000 ms');
+      // The property that makes batching safe at all: a batch says nothing about the files it did
+      // not carry. Without it, batching a 5,000-entry import proposed 5,000 deletions.
+      expect(text).toContain('部分上传');
+      expect(text).toContain('判成删除');
+      // And the property that makes it fast: the cost is the batch, not the project.
+      expect(text).toContain('与项目已经有多大无关');
       expect(text).toContain('整批回滚');
     } finally {
       await client.close();

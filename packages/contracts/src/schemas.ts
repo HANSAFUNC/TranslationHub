@@ -112,6 +112,15 @@ export const scanBatchSchema = z.object({
   projectId: z.string().min(1),
   repositoryConnectionId: z.string().min(1).optional(),
   scanId: z.string().min(1),
+  /**
+   * Whether this payload describes the whole repository or one batch of it.
+   *
+   * Absent means "the whole repository", which is what the CLI sends and what an older client
+   * sends. A caller that uploads in batches — an agent importing 5,000 keys, say — must say so:
+   * otherwise the entries it left out this time look deleted, and every one of them becomes an
+   * archive candidate that `push` has to write a row for.
+   */
+  partial: z.boolean().optional(),
   client: z
     .object({
       name: z.string(),

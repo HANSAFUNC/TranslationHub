@@ -821,6 +821,53 @@ Web 只引用这两个——把「浏览器能用哪部分」写成显式契约�
 源语言保护、空项目换源语言、有译文后拒绝换源语言、平台集合保存与「至少一个」、有 Key 的端不能删），
 以及浏览器实测三处交互。
 
+### 1.33 平台写入 100% 失败：一次推送的开销与项目大小成正比（本轮发现并修复）
+
+用户转来另一个 Agent 的记录：「平台侧 5 秒事务超时复现了」「连 1 条都失败」「每次卡满 5 秒事务上限」。
+
+**先复现**。本机单条写入是 87ms，看起来没问题；但那个 Agent 的项目（高研院iOS）已经有 2,792 个 key /
+5,480 条译文，而且 `sync_scans` 显示它每次只发 **1 条**仍失败，`sync_plans` 里那次只有 1 条扫描的计划却有
+**5,481 个 item**。差距在项目体积，不在批次大小。
+
+**根因**（两处，各自都足以致命）：
+
+| # | 问题 | 为什么致命 |
+| --- | --- | --- |
+| 1 | `createPreview` 把连接上**所有 baseline** 的 identity 都加进比较集合，`buildSyncPlan` 为每个都生成 item（含无事可做的 `SKIP`），`push` 再为**每个 item** 写一行 `sync_items` | 一次推送的开销 = 项目大小，而不是改动量。5,480 条 → 5,481 个 item，5 秒事务写不完 |
+| 2 | 批次被当成**整个仓库的快照**：本批没带的条目一律判 `ARCHIVE_CANDIDATE`（本地已删除） | 分批导入时每批都重新制造 5,480 个归档候选，每个同样写一行 `sync_items` |
+
+两条叠在一起：分批导入越到后面越慢，最后连 1 条都过不去——而**减小批次完全没用**，因为成本不在批次里。
+
+**修法**：
+
+1. `buildSyncPlan` 只把要做的 item 放进计划（`SKIP` 过滤掉），`summary` 仍统计它们——`unchanged: 5480`
+   是读者想知道的，5,480 行「什么都没发生」不是。§1.29 的经验在这里复用了：dry run 要回答「会变成什么样」。
+2. 新增 `sync_scans.partial`（迁移 `20261113000000_sync_scan_partial`）：CLI 的 `scan` 扫的是配置里全部
+   文件（`partial=false`，缺席即删除，归档候选照常）；`scan --file-set` 与 MCP 的 `import_translations`
+   只带部分文件（`partial=true`），于是**只有这一批出现的 identity 参与比较**。
+3. `TenantPrisma` 增加 `withOrganizationBulk`（默认 60 秒，`BULK_TRANSACTION_TIMEOUT_MS` 可配），给
+   `recordScan` / `createPreview` / `push` / `reportApply` / `markApplied` 这些「写入量由调用方决定」的
+   路径用。单独入口而不是开关，是为了让调用点读起来就是它本来的样子。
+
+**一个连带的语义变化**：`push` 的 `skipped` 现在只表示「计划里有、但决定不做」（例如没开 `includeDeletes`
+的归档候选）。无变化的条目根本不进计划，所以导入的返回值补了 `unchanged`，回答「这次导入做了事吗」。
+
+**实测**（修前 → 修后）：
+
+| 场景 | 修前 | 修后 |
+| --- | --- | --- |
+| 往 960 条的项目导入 1 条 | 1,287ms（且持续恶化） | — |
+| 往 10,400 条的项目导入 1 条 | 失败 | **1.1 秒** |
+| 往同一个项目填 10,400 条（每批 800） | 中途超时 | 全部通过 |
+| 往那个出问题的 5,480 条项目导入 1 / 20 / 100 条 | 全部失败 | 1.16s / 1.23s / 1.98s |
+
+**教程与文档同步改掉**：MCP 指南原先写「每批 300~400 条，否则必失败」——那个建议现在既不准确也没必要，
+改为说明「开销只与本批条数有关」以及「批次不会把没带来的文件判成删除」。工具描述里那句「单次只放
+300~400 条」同样改写。
+
+验证：217 单元 + 131 集成（新增 2 个回归测试：一次推送的 item 数必须等于改动量——那个 5,481 的 bug 会让它
+变成「改动量 + 项目全部条目」；以及重跑不变的条目时 `unchanged` 如实报告），外加容器栈实测。
+
 ## 2. 未实现 / 部分实现
 
 | 项                                                  | 状态       | 说明                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -920,7 +967,7 @@ POST /organization/members (READONLY)          # 无 token 管理成员的越权
 | Local / Remote MCP 真实客户端握手                | 通过（见附二）                          |
 | 端到端演示连续两次运行                           | 均通过（demo 自带项目清理，可重复执行） |
 | `pnpm test`                                      | 217 passed                              |
-| `pnpm test:integration`                          | 129 passed                              |
+| `pnpm test:integration`                          | 131 passed                              |
 | `node apps/e2e-demo/dist/run-demo.js`            | ALL ACCEPTANCE CHECKS PASSED            |
 | `docker compose config`（含 production overlay） | valid                                   |
 | `docker compose up -d --build`（整套栈）         | 5 个服务全部起，浏览器实测 24/24        |

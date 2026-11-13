@@ -601,6 +601,9 @@ model SyncScan {
   entryCount             Int      @default(0) @map("entry_count")
   files                  Json     @default("[]")
   entries                Json     @default("[]")
+  /// False means "this is the whole repository"; true means "one batch of it". A batch says
+  /// nothing about the files it did not carry, so its absences must not read as deletions.
+  partial                Boolean  @default(false)
   warnings               Json     @default("[]")
   createdAt              DateTime @default(now()) @map("created_at")
   expiresAt              DateTime @map("expires_at")

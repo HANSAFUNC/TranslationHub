@@ -86,7 +86,7 @@ export function summarize(items: SyncPlanItem[]): SyncPlanSummary {
 }
 
 export function buildSyncPlan(entries: ComparableEntry[], options: BuildPlanOptions): BuiltPlan {
-  const items: SyncPlanItem[] = sortEntries(entries).map((entry) => {
+  const everything: SyncPlanItem[] = sortEntries(entries).map((entry) => {
     const diff = computeSyncDiff(entry, options);
     const identityKey = [
       entry.identity.projectId,
@@ -103,6 +103,21 @@ export function buildSyncPlan(entries: ComparableEntry[], options: BuildPlanOpti
     };
   });
 
+  /**
+   * The plan carries the work, not the project.
+   *
+   * An entry that is identical on both sides and matches its baseline has nothing to do — that is
+   * the `SKIP` action. Those entries were materialised as items anyway, and `push` wrote one
+   * `sync_items` row
+   * per item inside a single five-second transaction — so the cost of importing **one key** grew
+   * with the size of the project. At 5,480 entries the plan held 5,481 items, the transaction ran
+   * out of time before it finished, and every import failed regardless of how little it carried.
+   *
+   * The summary still counts them: `unchanged: 5480` is information a reader wants. 5,480 rows
+   * saying "nothing happened" are not.
+   */
+  const items = everything.filter((item) => item.action !== 'SKIP');
+
   const payload: SyncPlanPayload = {
     planVersion: options.planVersion ?? 1,
     projectId: options.projectId,
@@ -111,7 +126,7 @@ export function buildSyncPlan(entries: ComparableEntry[], options: BuildPlanOpti
     direction: options.direction,
     baseRevision: options.baseRevision,
     items,
-    summary: summarize(items),
+    summary: summarize(everything),
   };
 
   return { payload, planHash: hashObject(payload) };

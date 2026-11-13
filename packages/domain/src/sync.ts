@@ -163,7 +163,7 @@ export class SyncService {
     payload: ScanBatchPayload,
     actor: SyncActor,
   ): Promise<{ scanId: string; connectionId: string; entryCount: number; fileCount: number; expansion: ProjectShapeExpansion }> {
-    return this.tenant.withOrganization(actor.organizationId, async (tx) => {
+    return this.tenant.withOrganizationBulk(actor.organizationId, async (tx) => {
       const project = await tx.project.findUnique({ where: { id: projectId }, select: { id: true, sourceLocale: true } });
       if (!project) throw new LocaleHubError(ErrorCode.NOT_FOUND, `Project ${projectId} not found`, 404);
 
@@ -204,6 +204,9 @@ export class SyncService {
           entryCount: entries.length,
           files: files as unknown as Prisma.InputJsonValue,
           entries: entries as unknown as Prisma.InputJsonValue,
+          // Kept on the row rather than on the plan: the plan is built later, from whichever scan
+          // the caller names, and the question "was this the whole repository" belongs to the scan.
+          partial: payload.partial ?? false,
           expiresAt,
         },
         update: {
@@ -212,6 +215,7 @@ export class SyncService {
           entryCount: entries.length,
           files: files as unknown as Prisma.InputJsonValue,
           entries: entries as unknown as Prisma.InputJsonValue,
+          partial: payload.partial ?? false,
           gitBranch: payload.client?.gitBranch ?? null,
           gitCommit: payload.client?.gitCommit ?? null,
           expiresAt,
@@ -255,12 +259,16 @@ export class SyncService {
     },
     actor: SyncActor,
   ): Promise<{ plan: SyncPlanPayload; planHash: string; expiresAt: string; sessionId: string; conflicts: number; planId: string }> {
-    return this.tenant.withOrganization(actor.organizationId, async (tx) => {
+    return this.tenant.withOrganizationBulk(actor.organizationId, async (tx) => {
       const scan = await tx.syncScan.findUnique({ where: { scanId: params.scanId } });
       if (!scan) throw new LocaleHubError(ErrorCode.NOT_FOUND, `Scan ${params.scanId} not found`, 404);
       if (scan.expiresAt.getTime() < Date.now()) {
         throw new LocaleHubError(ErrorCode.SYNC_PLAN_EXPIRED, `Scan ${params.scanId} expired`, 409);
       }
+      // A batch is not a statement about the files it did not carry. Treating its absence as a
+      // deletion is what turned a 5,000-entry project into 5,000 archive candidates on every
+      // import of one key, and what made those imports exceed the transaction budget.
+      const partial = scan.partial;
 
       const revision = await getProjectRevision(tx, params.projectId);
       const localEntries = this.parseScanEntries(scan.entries);
@@ -300,8 +308,18 @@ export class SyncService {
         );
       }
 
-      const identities = new Set<string>([...localMap.keys(), ...baselineMap.keys()]);
-      if (params.direction !== 'push') for (const key of remoteMap.keys()) identities.add(key);
+      // For a partial scan the baselines only supply the third side of the comparison; they are
+      // not a list of things this scan failed to mention. Entries the batch did not carry are left
+      // out of the plan entirely.
+      const identities = new Set<string>(localMap.keys());
+      if (!partial) {
+        for (const key of baselineMap.keys()) identities.add(key);
+        if (params.direction !== 'push') for (const key of remoteMap.keys()) identities.add(key);
+      } else if (params.direction !== 'push') {
+        // Pull still needs the remote-only side: those are entries the platform has and this
+        // batch says nothing about, which is a different question from "deleted locally".
+        for (const key of remoteMap.keys()) if (!localMap.has(key)) identities.add(key);
+      }
 
       const comparable = [...identities].map((id) => {
         const local = localMap.get(id) ?? null;
@@ -508,7 +526,7 @@ export class SyncService {
     params: { syncPlanId?: string; planHash: string; client?: SyncPushClientInfo; idempotencyKey?: string; includeDeletes?: boolean },
     actor: SyncActor,
   ): Promise<PushResult> {
-    return this.tenant.withOrganization(actor.organizationId, async (tx) => {
+    return this.tenant.withOrganizationBulk(actor.organizationId, async (tx) => {
       const plan = await tx.syncPlan.findUnique({
         where: { planHash: params.planHash },
         include: { session: true },
@@ -1504,7 +1522,7 @@ export class SyncService {
     },
     actor: SyncActor,
   ): Promise<MarkAppliedResult> {
-    return this.tenant.withOrganization(actor.organizationId, async (tx) => {
+    return this.tenant.withOrganizationBulk(actor.organizationId, async (tx) => {
       const project = await tx.project.findUnique({ where: { id: params.projectId }, select: { id: true } });
       if (!project) {
         throw new LocaleHubError(ErrorCode.NOT_FOUND, `Project ${params.projectId} not found`, 404);
@@ -1706,7 +1724,7 @@ export class SyncService {
   }
 
   async reportApply(payload: ApplyReportRequest, actor: SyncActor): Promise<{ baselineUpdated: number; sessionId: string }> {
-    return this.tenant.withOrganization(actor.organizationId, async (tx) => {
+    return this.tenant.withOrganizationBulk(actor.organizationId, async (tx) => {
       const session = await tx.syncSession.findUnique({ where: { id: payload.syncSessionId } });
       if (!session) throw new LocaleHubError(ErrorCode.SYNC_SESSION_NOT_FOUND, `Sync session ${payload.syncSessionId} not found`, 404);
 

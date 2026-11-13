@@ -47,6 +47,36 @@
    - 逐条重新应用，**不信任客户端上传的变更明细**。
 5. 同一计划重复 push → 幂等重放（返回上次结果，`idempotentReplay=true`），不会重复创建版本。
 
+### 3.1 计划里装的是「要做的事」，不是「项目」
+
+计划（`sync_plans.plan_json`）曾经为**比较过的每一条**都生成一个 item，包括两侧一致、无事可做的那些；
+`push` 再为每个 item 写一行 `sync_items`。后果是**一次推送的开销与项目大小成正比**：往一个有 5,480 条译文的
+项目里导入 1 个 key，计划里有 5,481 个 item，事务在写完之前就超时——于是那批导入 100% 失败，且与每次传多少
+条无关。
+
+现在计划只带 `SKIP`（无事可做）以外的 item；`summary` 仍然统计它们（`unchanged: 5480` 是读者想知道的，
+5,480 行「什么都没发生」不是）。
+
+### 3.2 部分扫描：批次不对它没带的文件表态
+
+`sync_scans.partial` 区分「这是整个仓库」与「这是其中一批」。
+
+- CLI 的 `scan` 扫的是配置里全部文件 → `partial = false`，缺席即删除，归档候选照常产生。
+- CLI 的 `scan --file-set`、MCP 的 `import_translations` 只带了部分文件 → `partial = true`，**只有这一批里
+  出现的 identity 参与比较**；没带来的条目不进计划，也就不会被判成「本地已删除」。
+
+没有这个标记时，分批导入会在每一批里都把「本批没带的历史条目」重新判成归档候选：5,480 条历史 = 每批 5,480
+个归档候选，每个都要写一行 `sync_items`。这是上面那个超时的另一半原因。
+
+### 3.3 事务预算
+
+`TenantPrisma.withOrganization` 默认 5 秒（Prisma 的交互式事务默认值），适用于碰几行的请求。
+写入量由调用方决定的路径——`recordScan`、`createPreview`、`push`、`reportApply`、`markApplied`——走
+`withOrganizationBulk`，预算 60 秒（`BULK_TRANSACTION_TIMEOUT_MS` 可配）。
+
+单独的入口而不是一个开关，是为了让调用点读起来就是它们本来的样子：一次批量写入选了更大的预算，
+而不是一个普通请求被悄悄拿走了五秒。
+
 ## 4. 幂等、并发与重试
 
 - `Idempotency-Key` 建议：`repo-<connection>-<commit>-<planHash>`。

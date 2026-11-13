@@ -34,6 +34,8 @@ export interface ScanOptions {
   scanId: string;
   client: { name: string; version: string; gitBranch?: string; gitCommit?: string };
   knownLocales?: string[];
+  /** Set when the caller scanned only part of the repository, so absences are not deletions. */
+  partial?: boolean;
 }
 
 /**
@@ -75,6 +77,7 @@ export async function scanAndCollect(
   const payload: ScanBatchPayload = {
     projectId: options.projectId,
     scanId: options.scanId,
+    ...(options.partial ? { partial: true } : {}),
     client: options.client,
     files: result.files.map((file) => ({
       fileId: file.fileId,
