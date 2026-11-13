@@ -60,7 +60,7 @@ Web 端「MCP 管理 → 接入教程」是同一份流程，且会用**你自�
 - **配置是「返回」而不是「写入」。** `create_project` 返回配置文件的内容，由 Agent 写进仓库——
   平台不碰你的磁盘，这条边界在初始化路径上同样成立。
 - **导入走的是 CLI 同一条管道**（scan → preview → push），所以「Agent 导入」与「CLI 推送」不可能
-  在平台上留下不同的状态。默认 dry-run，与其余所有写操作一致。
+  在平台上留下不同的状态。`import_translations` 默认 dry-run（`confirm` 缺省为 false）。
 
 初始化之后 CLI 就能接手：`localehub scan` → `localehub sync preview` → `sync push --confirm`。
 
@@ -164,6 +164,11 @@ claude mcp add --transport http localehub-remote http://localhost:3003/mcp \
 `review_translation_entries`、`update_translation_draft`、`submit_review`、`mark_applied`、
 `upload_screen_mockup` 声明 `readOnlyHint: false`，其余 11 个为只读。
 客户端据此可以判断哪些调用会改动平台数据。
+
+只有两个写工具能预演：`import_translations`（`confirm: true` 才落库）与 `mark_applied`
+（`dry_run: true` 只看结果）。其余写工具——`create_project`、`translate_entries`、
+`review_translation_entries`、`update_translation_draft`、`upload_screen_mockup`——一调即写，
+没有 dry-run 开关；`upload_screen_mockup` 还会整体替换同名屏幕，`destructiveHint` 为 true。
 
 约束：
 

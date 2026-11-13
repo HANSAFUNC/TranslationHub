@@ -35,7 +35,8 @@ export const REMOTE_MCP_INSTRUCTIONS = [
   '译者在编辑器里就能对着界面看译文。坐标是相对图片的比例（0~1），不是像素；key 还没导入也能标，之后导入会自动对上。',
   '注意 upload_screen_mockup 没有 dry run：同名再传是整体替换（旧图与旧标记不再保留），所以别拿它「先试一下」。',
   '',
-  '除 upload_screen_mockup 外，所有写操作默认 dry run（confirm/dry_run 缺省为 false）：先看不写，确认后再落库。',
+  '先看不写这件事只有两个工具提供：import_translations 用 confirm=true 才落库，mark_applied 用 dry_run=true 只看结果。',
+  '其余写工具（translate_entries、review_translation_entries、update_translation_draft、create_project、upload_screen_mockup）一调即写，没有预演。',
   'AI 生成的译文一律是草稿；审核与发布必须由具备权限的人类完成，Agent 的批准会被拒绝——这是设计。',
 ].join('\n');
 

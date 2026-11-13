@@ -32,7 +32,7 @@ let session = { email: '', password: '', token: '' };
 interface Envelope<T> {
   success: boolean;
   data?: T;
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; requestId?: string };
 }
 
 async function call<T = unknown>(
@@ -116,6 +116,25 @@ async function uploadSketch(
   });
   expect(result.isError, JSON.stringify(result.content)).toBeFalsy();
   return payload<UploadResult>(result);
+}
+
+/** The REST upload, returning the raw status so a test can expect a refusal. */
+async function uploadSketchRaw(
+  projectId: string,
+  options: { name: string; replace: boolean },
+): Promise<{ status: number; body: Envelope<unknown> }> {
+  return call(`/projects/${projectId}/mockups`, {
+    method: 'POST',
+    token: session.token,
+    body: {
+      name: options.name,
+      platform: 'web',
+      locale: 'en-US',
+      imageBase64: base64(SKETCH),
+      markers: [{ key: 'checkout.title', x: 0.1, y: 0.1 }],
+      replace: options.replace,
+    },
+  });
 }
 
 beforeAll(async () => {
@@ -575,6 +594,133 @@ describe('screen mockups', () => {
     }, 60_000);
   });
 
+  it('resolves the locale the same way the write path stores it', async () => {
+    // Entries are stored under the canonical tag. Reading with `?locale=EN-US` used to match nothing
+    // and report every marker as having no translation — a wrong answer with a 200, which is the
+    // hardest kind to notice.
+    const list = await call<{ id: string }[]>(`/projects/${projectId}/mockups`, { token: session.token });
+    const mockupId = list.body.data![0]!.id;
+    const canonical = await call<{ markers: { entry: unknown }[] }>(
+      `/projects/${projectId}/mockups/${mockupId}?locale=en-US`,
+      { token: session.token },
+    );
+    const upper = await call<{ markers: { entry: unknown }[] }>(
+      `/projects/${projectId}/mockups/${mockupId}?locale=EN-US`,
+      { token: session.token },
+    );
+    const filled = (rows: { entry: unknown }[]) => rows.filter((row) => row.entry !== null).length;
+    expect(filled(canonical.body.data!.markers)).toBeGreaterThan(0);
+    expect(filled(upper.body.data!.markers)).toBe(filled(canonical.body.data!.markers));
+  }, 60_000);
+
+  it('does not count an archived key as a match', async () => {
+    // An archived key was dropped from the repository: the editor does not list it, so a marker that
+    // resolves to it must not be reported as a match either.
+    const prisma = new PrismaClient();
+    // `set_config(…, true)` is transaction-local: run outside a transaction it is gone by the next
+    // statement, the update matches nothing under RLS, and the assertion below then passes for the
+    // wrong reason. Both halves run inside one transaction, like the suite's own bootstrap does.
+    const setArchived = (archivedAt: Date | null) =>
+      prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`SELECT set_config('app.bypass_rls', 'on', true)`);
+        const updated = await tx.translationKey.updateMany({
+          where: { projectId, key: 'checkout.empty' },
+          data: { archivedAt },
+        });
+        expect(updated.count).toBe(1);
+      });
+    try {
+      await setArchived(new Date());
+
+      const result = await uploadSketch(projectId);
+      // It is reported as unmatched — "the platform does not have this" — rather than matched.
+      expect(result.markers.unmatched.map((row) => row.key)).toContain('checkout.empty');
+
+      await setArchived(null);
+      const restored = await uploadSketch(projectId);
+      expect(restored.markers.unmatched.map((row) => row.key)).not.toContain('checkout.empty');
+    } finally {
+      await prisma.$disconnect();
+    }
+  }, 120_000);
+
+  it('returns the ETag and cache directive on a 304, so a revalidation has something to store', async () => {
+    const list = await call<{ id: string }[]>(`/projects/${projectId}/mockups`, { token: session.token });
+    const mockupId = list.body.data![0]!.id;
+    const url = `${API_BASE}/projects/${projectId}/mockups/${mockupId}/image`;
+    const first = await fetch(url, { headers: { authorization: `Bearer ${session.token}` } });
+    expect(first.status).toBe(200);
+    const etag = first.headers.get('etag');
+    expect(etag).toBeTruthy();
+
+    const revalidated = await fetch(url, {
+      headers: { authorization: `Bearer ${session.token}`, 'if-none-match': etag! },
+    });
+    expect(revalidated.status).toBe(304);
+    expect(revalidated.headers.get('etag')).toBe(etag);
+    expect(revalidated.headers.get('cache-control')).toContain('no-cache');
+  }, 60_000);
+
+  it('tells "no such key" apart from "no source text", which the editor shows differently', async () => {
+    // A key imported only under a non-source locale has a key row and an entry but no SourceVersion.
+    // The editor used to read `source === null` as "the platform does not have this key" and told the
+    // reviewer to import a key the editor already lists — so the two states have to stay distinct in
+    // the payload.
+    await client!.callTool({
+      name: 'import_translations',
+      arguments: {
+        project_id: projectId,
+        confirm: true,
+        files: [
+          {
+            path: 'ios/ja-JP/Localizable.strings',
+            locale: 'ja-JP',
+            platform: 'ios',
+            entries: [{ key: 'checkout.only_japanese', value: 'お会計' }],
+          },
+        ],
+      },
+    });
+
+    await uploadSketch(projectId, { name: 'partial', keys: ['checkout.only_japanese', 'checkout.absent'] });
+    const list = await call<{ id: string; name: string }[]>(`/projects/${projectId}/mockups`, { token: session.token });
+    const partial = list.body.data!.find((row) => row.name === 'partial')!;
+    const detail = await call<{ markers: { key: string; platform: string | null; source: string | null; entry: unknown }[] }>(
+      `/projects/${projectId}/mockups/${partial.id}?locale=ja-JP`,
+      { token: session.token },
+    );
+
+    const imported = detail.body.data!.markers.find((row) => row.key === 'checkout.only_japanese')!;
+    expect(imported.platform).not.toBeNull();
+    expect(imported.source).toBeNull();
+    expect(imported.entry).not.toBeNull();
+
+    const absent = detail.body.data!.markers.find((row) => row.key === 'checkout.absent')!;
+    expect(absent.platform).toBeNull();
+    expect(absent.entry).toBeNull();
+
+    await call(`/projects/${projectId}/mockups/${partial.id}`, { method: 'DELETE', token: session.token });
+  }, 120_000);
+
+  it('lets the unique index decide a concurrent replace: false, rather than a read that both pass', async () => {
+    // The guard is a read, and two requests in flight both see no row. `replace: false` therefore has
+    // to be a create — only the index can settle it — or the second silently overwrites the first
+    // while reporting `replaced: false`.
+    const results = await Promise.all([
+      uploadSketchRaw(projectId, { name: 'racer', replace: false }),
+      uploadSketchRaw(projectId, { name: 'racer', replace: false }),
+    ]);
+    const ok = results.filter((row) => row.status === 201);
+    const refused = results.filter((row) => row.status === 409);
+    expect(ok).toHaveLength(1);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]!.body.error?.code).toBe('CONFLICT');
+
+    const list = await call<{ id: string; name: string }[]>(`/projects/${projectId}/mockups`, { token: session.token });
+    const racer = list.body.data!.find((row) => row.name === 'racer');
+    if (racer) await call(`/projects/${projectId}/mockups/${racer.id}`, { method: 'DELETE', token: session.token });
+  }, 120_000);
+
   it('answers a body over the route limit with 413 in the standard envelope', async () => {
     // The larger limit is mounted on this route alone. A refusal used to arrive as 500 (Express's
     // parser error passing through the generic branch) or, before that, as Nest's default HTML.
@@ -588,6 +734,10 @@ describe('screen mockups', () => {
     const body = (await response.json()) as Envelope<unknown>;
     expect(body.success).toBe(false);
     expect(body.error!.code).toBe('VALIDATION_ERROR');
+    // This answer comes from a hand-mounted parser, which runs before the middleware that mints the
+    // request id — so it used to be the one error a client could not correlate with the logs.
+    expect(body.error!.requestId).toBeTruthy();
+    expect(response.headers.get('x-request-id')).toBe(body.error!.requestId);
   }, 60_000);
 
   it('keeps the same-name-plus-namespace identity apart when asking which screen shows a key', async () => {

@@ -106,6 +106,12 @@ export class MockupsController {
       ? null
       : await this.mockups.image(actor, projectId, mockupId);
     if (!mockup) {
+      // A 304 still has to describe what it is the revalidation of (RFC 9110 §15.4.5): without the
+      // ETag and the cache directive, a client or proxy that takes its freshness metadata from this
+      // response has nothing to store and may treat the entry as heuristically cacheable — the
+      // opposite of what the 200 says.
+      response.setHeader('etag', etag);
+      response.setHeader('cache-control', 'private, no-cache');
       response.status(304).end();
       return;
     }

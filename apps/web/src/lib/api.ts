@@ -299,7 +299,11 @@ export interface MockupMarker {
   note: string | null;
   /** The platform the key was found on; null when the project has no such key. */
   platform: string | null;
-  /** The platform's source text for this key; null when the platform has no such key. */
+  /**
+   * The platform's source text for this key. Null either when the key is not in the project at all
+   * (`platform` is null too) or when it exists but has no source-locale version yet — use `platform`
+   * to tell those apart.
+   */
   source: string | null;
   entry: { entryId: string; value: string; status: string; revision: number; updatedAt: string } | null;
 }

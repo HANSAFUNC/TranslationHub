@@ -147,7 +147,8 @@ platform, name)` 的唯一索引不按租户隔离，放行会让他人永久占
 路由上放宽到 4 MB（其余路由仍是默认的 100 kB），超限返回 413 而不是 500。
 
 `containsKey` 按 `(namespace, key)` 匹配 —— namespace 是 Key 身份的一部分，只按名字会为「同名的另一个
-namespace」回答 yes。
+namespace」回答 yes。详情接口的 `?locale=` 会先规范化（与写入侧一致），归档的 Key（`archivedAt` 非空）
+不计为匹配；图片的 304 同样带 `ETag` 与 `Cache-Control: private, no-cache`。
 
 ## 5. 同步（核心）
 

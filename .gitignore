@@ -26,3 +26,5 @@ packages/database/generated/
 .demo-workspace/
 .demo-workspace-integration/
 .localehub-bundles/
+__pycache__/
+*.pyc

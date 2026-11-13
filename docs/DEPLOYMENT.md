@@ -31,6 +31,18 @@ Next 的 `/api/v1` 转发目标在构建期就写死了（见 `docker/web.Docker
   但所有 `/api/v1` 调用都会 500。
 - **api 在开发栈里要显式 `ALLOW_INSECURE_HTTP: "true"`**。`NODE_ENV=production` 且没有 TLS 时，
   登录会成功，之后每个请求都 403 `INSECURE_TRANSPORT`。
+- **让局域网里别的机器登录，要加 `CORS_ORIGINS`**。默认只允许 `http://localhost:3000`，别人用
+  `http://192.168.x.x:3000` 打开时，登录会以 403 `CSRF_VERIFICATION_FAILED`（`Origin … is not
+  allowed`）被拒。把浏览器地址栏里会出现的每个地址都列进去：
+  `CORS_ORIGINS=http://localhost:3000,http://192.168.1.20:3000`。
+
+**为什么「本机好使、别人登不进去」**：两道独立的门，症状都只是「登录没反应」。
+1. **`Origin` 不在允许列表** → 403，登录请求根本没执行。
+2. **会话 Cookie 带 `Secure`，而浏览器访问的是 `http://`** → 这个 Cookie 被浏览器静默丢弃，登录
+   返回 201、页面却仍然未登录。Chrome 把 `http://localhost` 视为安全上下文，所以只有开发机不受影响。
+   现在 `Secure` 跟随 `ALLOW_INSECURE_HTTP`：开发栈（明文 HTTP）不设 `Secure`，生产（TLS）照常设。
+   如果用 `CORS_ORIGINS` 把栈开给局域网，请只在内网使用——明文 HTTP 下会话 Cookie 不设 `Secure`，
+   同网段的人能看到它。
 
 ### 2.1 准备 Secret
 

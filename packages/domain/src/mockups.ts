@@ -254,19 +254,26 @@ export async function upsertScreenMockup(
     createdById: input.userId,
   };
 
-  // One statement, keyed on the unique index, rather than "read, decide, write".
+  // The write never decides *whether* it may replace — the read above does — and each intent gets the
+  // statement that makes it true under concurrency:
   //
-  // The read above decides *whether the caller is allowed* to replace — a question about intent — but
-  // it must not decide the write itself: two same-name uploads in flight (an agent retrying while the
-  // first is still committing) both read `existing = null`, and the loser used to hit the unique index
-  // and come back as `CONFLICT`, refusing a perfectly legal `replace: true` re-upload. Handing both
-  // cases to `upsert` lets the index arbitrate.
-  const { id: mockupId } = await tx.screenMockup.upsert({
-    where: { projectId_platform_name: { projectId: input.projectId, platform: input.platform as never, name: input.name } },
-    create: data,
-    update: { ...data, markers: { deleteMany: {} } },
-    select: { id: true },
-  });
+  //   - `replace: false` is a plain `create`. Only the unique index can tell two concurrent callers
+  //     apart, and it does so atomically: the loser gets `P2002`, which the exception filter maps to
+  //     409. A read-then-write let both pass the check and the second silently overwrote the first
+  //     while reporting `replaced: false`.
+  //   - `replace: true` is an `upsert`. Two same-name uploads in flight (an agent retrying while the
+  //     first is still committing) both read `existing = null`; the loser used to hit the index and
+  //     come back as CONFLICT, refusing a perfectly legal replacement.
+  const mockupId = input.replace
+    ? (
+        await tx.screenMockup.upsert({
+          where: { projectId_platform_name: { projectId: input.projectId, platform: input.platform as never, name: input.name } },
+          create: data,
+          update: { ...data, markers: { deleteMany: {} } },
+          select: { id: true },
+        })
+      ).id
+    : (await tx.screenMockup.create({ data, select: { id: true } })).id;
 
   // Resolve which markers name a key the project actually has, by (namespace, key) rather than by the
   // full identity.
@@ -280,7 +287,10 @@ export async function upsertScreenMockup(
   // textually, and the platform each one resolved to is reported so a mismatch stays visible.
   const keyNames = [...new Set(markers.map((marker) => marker.key))];
   const keys = await tx.translationKey.findMany({
-    where: { projectId: input.projectId, key: { in: keyNames } },
+    // `archivedAt: null`, like every other key read in the codebase. An archived key was dropped from
+    // the repository, so a marker pointing at it is pointing at something the editor will not list —
+    // counting it as matched told the caller a key was imported when it had been removed.
+    where: { projectId: input.projectId, key: { in: keyNames }, archivedAt: null },
     select: { key: true, namespace: { select: { name: true } } },
   });
   const known = new Set(keys.map((row) => `${row.namespace.name}\u0000${row.key}`));
@@ -440,8 +450,10 @@ export async function resolveScreenMarkers(
   const keyNames = [...new Set(ordered.map((marker) => marker.key))];
   const keys = await tx.translationKey.findMany({
     // No platform filter — see the note in `upsertScreenMockup`: the field a caller sets never reaches
-    // a key's stored platform today, so requiring it here would resolve nothing.
-    where: { projectId: params.projectId, key: { in: keyNames } },
+    // a key's stored platform today, so requiring it here would resolve nothing. Archived keys *are*
+    // filtered: the editor's own list does not show them, and a sketch that presents one as current
+    // would offer an 「在编辑器中打开」 that lands on a row the editor cannot display.
+    where: { projectId: params.projectId, key: { in: keyNames }, archivedAt: null },
     select: {
       id: true,
       key: true,
@@ -468,11 +480,15 @@ export async function resolveScreenMarkers(
     return bucket.find((row) => (row.platform as string) === params.platform) ?? bucket[0]!;
   };
 
-  const entries = params.locale
+  // Canonicalised the same way the write path and the project's locale list are: entries are stored
+  // under the canonical tag, so `?locale=EN-US` used to match nothing and report every string as
+  // untranslated — a wrong answer with a 200, which is the hardest kind to notice.
+  const locale = params.locale && isValidLocaleTag(params.locale) ? canonicalizeLocaleTag(params.locale) : params.locale;
+  const entries = locale
     ? await tx.translationEntry.findMany({
         where: {
           projectId: params.projectId,
-          localeCode: params.locale,
+          localeCode: locale,
           keyId: { in: keys.map((row) => row.id) },
         },
         select: { id: true, keyId: true, value: true, status: true, revision: true, updatedAt: true },

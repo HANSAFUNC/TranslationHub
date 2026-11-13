@@ -1074,6 +1074,38 @@ true）；390×844 窄屏下弹窗 367×776、`scrollWidth == clientWidth`（无
 
 横屏修复也在浏览器里量过：1440×900 的草图，盒子 798×499（比例 1.600，与图片一致；修复前是 0.84），375×812 的仍是 364×789（0.462），两者都是 7/7 标记落在图内、右侧 7 行；点标记↔点条目的双向联动仍为 true，窄屏无横向溢出，控制台无异常。
 
+**评审复查后又修的 7 处**（连同上面那批一起进了同一个提交）：
+
+| 问题 | 症状 | 修复 |
+| --- | --- | --- |
+| 「平台没有这个 Key」判断错了依据 | 用 `source === null` 当「Key 不存在」，而只导入了非源语言的 Key 有 Key 行、有译文、只是没有 SourceVersion——编辑器于是对着一条真译文说「平台没有这个 Key」 | 改看 `platform === null`：那才是 domain 里「项目里没有这个 Key」的信号 |
+| 归档的 Key 仍算匹配 | 两个 marker→key 查询都没过滤 `archivedAt`，而库里其它每一处都过滤（sync.ts、translations.service.ts、content/platform controller、MCP 服务端）。已经归档（仓库里已删）的 Key 会被当成现存，`matchedKeys` 也把它算进去 | 两处都加 `archivedAt: null` |
+| 读路径不规范化 locale | 写入侧规范化（`zh-hans` → `zh-CN`），读取侧直接拿 `?locale=` 去比：`EN-US` 匹配不到任何条目，于是每个标记都显示「该语言还没有条目」——200 的错误答案 | 读路径同样规范化，非法标签仍原样传下去由校验层报错 |
+| `replace: false` 的并发语义 | 「先查再写」：两个并发请求都读到「不存在」，第二个于是走了 update 分支，把第一次的上传覆盖掉，还返回 `replaced: false` | `replace: false` 走 `create`，由唯一索引原子裁决（输的一方 P2002 → 409）；`replace: true` 走 `upsert` |
+| 草图语言与源语言不同也报「与平台原文不一致」 | 用 `ja-JP` 画的草图，每个标记都会被标成与 en-US 原文不一致 | 只在 `mockup.locale === sourceLocale` 时才比较文本 |
+| 304 不带 ETag 与 Cache-Control | 按 RFC 9110 §15.4.5，304 也要说明自己在重新验证什么；缺了这两个头，客户端/代理没有可存的元数据，可能把条目当成启发式可缓存——与 200 说的正好相反 | 304 分支补上 ETag 与 `private, no-cache` |
+| 「所有写操作默认 dry run」是错的 | 实际只有 `import_translations`（`confirm`）与 `mark_applied`（`dry_run`）能预演；`review_translation_entries`、`update_translation_draft` 等一调即写，跟着这句话去「演练」就会真的落库。`docs/MCP.md` 有同样一句 | 两处都改成点名哪两个工具能预演、其余的调用即写 |
+
+顺带把评审提到的一个小口子补了：413 响应原先没有 `requestId`（手工挂载的解析器跑在 request-context 中间件之前），它是全 API 唯一无法与日志对照的错误；现在沿用调用方的 `x-request-id`（没有就生成一个）并同时写回响应头。
+
+**局域网登录（用户报的问题，已单独查明并修复）**：别人用 `http://192.168.x.x:3000` 打不开，是两道独立的门叠加，而症状都只是「登录没反应」：
+
+1. `Origin` 不在 `CORS_ORIGINS`（默认只有 `http://localhost:3000`）→ 登录请求直接 403
+   `CSRF_VERIFICATION_FAILED`。这是配置，需要把局域网地址加进去。
+2. 会话 Cookie 带 `Secure`，而别人访问的是明文 HTTP → **浏览器静默丢弃 Cookie**：登录返回 201，
+   但之后仍是未登录。Chrome 把 `http://localhost` 当成安全上下文，所以只有开发机不受影响——
+   这正是「本机好使、别人登不进去」的分界。修复：`Secure` 跟随 `ALLOW_INSECURE_HTTP`，开发栈
+   （明文）不设、生产（TLS）照常设。
+
+实测（无头 Chrome，从 `http://192.168.0.101:3000` 登录）：修复前登录 201 但 cookie 存储为空、
+后续请求 401；修复后 `localehub_session` / `localehub_csrf` 两个 cookie 都落库（`secure=false`），
+后续 `GET /projects` 返回 200。同时把「开给局域网」的写法与代价写进了 `env.example`、
+`docs/DEPLOYMENT.md` 与 `compose.yaml`（明文下 cookie 不设 Secure，只适合内网；长期对外应前置 TLS）。
+
+另外把 `scripts/append-rls.py` 的租户表清单补上 `screen_mockups` / `screen_mockup_markers`——
+迁移里手写了 RLS 策略（库里两条 `tenant_isolation` 已生效），但生成器不认识这两张表，重新生成时
+会把它们漏掉。
+
 顺带修掉的一个「不是缺陷但会挡住它」的问题：API 的 JSON 请求体默认上限是 Express 的 100 kB，而一张
 草图经 base64 之后轻易超过它——`POST /projects/:id/mockups` 会以 413 拒掉一张正常的线框图。已在
 `main.ts` 提到 4 MB，与 MCP 传输层的上限一致，并加了一条 180 kB 载荷的回归测试。

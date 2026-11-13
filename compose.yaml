@@ -49,6 +49,10 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev-only-encryption-key-change-me}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:3001/api/v1}
+      # Every origin a browser will type. The default covers the machine itself; to let other
+      # machines on the LAN log in, add their address too (an origin that is missing here is
+      # refused with 403 CSRF_VERIFICATION_FAILED, and the login form simply does nothing):
+      #   CORS_ORIGINS=http://localhost:3000,http://192.168.1.20:3000
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       # What the Web UI and `localehub mcp-config` tell clients to connect to. The MCP client
       # runs on a developer's machine, so it must be an address reachable from there — not the

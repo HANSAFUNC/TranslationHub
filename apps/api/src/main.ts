@@ -5,6 +5,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { json, type NextFunction, type Request, type Response } from 'express';
+import { randomUUID } from 'node:crypto';
 import { ErrorCode } from '@localehub/contracts';
 import { contextRequestId } from './common/request-context';
 import { corsOrigins, loadEnv } from '@localehub/config';
@@ -78,12 +79,19 @@ async function bootstrap(): Promise<void> {
     (error: { status?: number; type?: string; message?: string }, request: Request, response: Response, next: NextFunction) => {
       if (!error) return next();
       const status = typeof error.status === 'number' && error.status >= 400 ? error.status : 400;
+      // This middleware runs before Nest's request-context middleware, so there is no id in the async
+      // context yet — but a client that correlates errors by `requestId` should not hit the one error
+      // it cannot correlate. Take the caller's header when it sent one (the same rule the middleware
+      // uses) and mint one otherwise; either way it is also set as the response header, so it lines up
+      // with what the logs would show for the same request.
+      const requestId = contextRequestId() ?? (request.headers['x-request-id'] as string | undefined) ?? randomUUID();
+      response.setHeader('x-request-id', requestId);
       response.status(status).json({
         success: false,
         error: {
           code: ErrorCode.VALIDATION_ERROR,
           message: error.message ?? 'Invalid request body',
-          requestId: contextRequestId(),
+          requestId,
         },
       });
     },

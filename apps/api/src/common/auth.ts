@@ -220,7 +220,16 @@ const SESSION_TTL_SECONDS = 12 * 60 * 60;
 export function setSessionCookie(response: Response, token: string): void {
   const common = {
     sameSite: 'lax' as const,
-    secure: process.env.NODE_ENV === 'production',
+    // `Secure` unless the deployment has explicitly said it is serving plain HTTP.
+    //
+    // This flag is the difference between "works on my machine" and "nobody else can log in": a
+    // browser drops a `Secure` cookie that arrives over http://, with no error anywhere — the login
+    // response is a perfectly good 201 and the session simply does not exist afterwards. Chrome
+    // exempts `http://localhost` (a secure context by definition), so the stack behaves on the
+    // developer's machine and fails for every other machine on the LAN. `ALLOW_INSECURE_HTTP` is
+    // already the switch that says "this hop is plain HTTP on purpose" — the same one the transport
+    // guard reads — so the cookie follows it instead of contradicting it.
+    secure: process.env.NODE_ENV === 'production' && process.env.ALLOW_INSECURE_HTTP !== 'true',
     path: '/',
     maxAge: SESSION_TTL_SECONDS * 1_000,
   };

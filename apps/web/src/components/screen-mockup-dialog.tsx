@@ -421,6 +421,8 @@ export function ScreenMockupDialog({
                         index={index}
                         marker={marker}
                         screenPlatform={detail.mockup.platform}
+                        sketchLocale={detail.mockup.locale}
+                        sourceLocale={sourceLocale}
                         active={markerKey(marker) === activeKey}
                         onSelect={() => select(markerKey(marker))}
                         onOpenInEditor={onOpenInEditor}
@@ -445,6 +447,8 @@ function MarkerRow({
   index,
   marker,
   screenPlatform,
+  sketchLocale,
+  sourceLocale,
   active,
   onSelect,
   onOpenInEditor,
@@ -453,16 +457,27 @@ function MarkerRow({
   index: number;
   marker: MockupMarker;
   screenPlatform: string;
+  /** The language the sketch's text is drawn in. */
+  sketchLocale: string;
+  /** The project's source locale; drift is only meaningful when the two agree. */
+  sourceLocale: string | undefined;
   active: boolean;
   onSelect: () => void;
   onOpenInEditor: (entry: { entryId: string; value: string }) => void;
   register: (node: HTMLElement | null) => void;
 }) {
-  const missingKey = marker.source === null;
+  // `platform === null` is the marker's "this key is not in the project" signal, from the domain's
+  // resolution. `source === null` is not the same thing: a key imported only under a non-source
+  // locale has a key row and an entry but no SourceVersion, and calling that "平台没有这个 Key" told a
+  // reviewer to import a key the editor already lists.
+  const missingKey = marker.platform === null;
   const untranslated = !missingKey && (!marker.entry || !marker.entry.value);
-  // The sketch is drawn from one language; if a marker's text disagrees with the platform's source
-  // text, the screen may have moved on since the upload. Worth showing, never worth hiding.
-  const textDrift = Boolean(marker.text && marker.source && marker.text !== marker.source);
+  // The sketch is drawn in its own language (`mockup.locale`), which is often — but not always — the
+  // project's source. Comparing against the source text without checking that is how a sketch
+  // deliberately drawn in ja-JP gets flagged on every marker as drifting from an en-US original.
+  const textDrift = Boolean(
+    marker.text && marker.source && sketchLocale === sourceLocale && marker.text !== marker.source,
+  );
 
   return (
     <li

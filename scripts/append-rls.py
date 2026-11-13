@@ -22,6 +22,7 @@ TENANT_TABLES = {
     "sync_items", "sync_baselines", "sync_plans", "sync_conflicts", "sync_apply_reports",
     "project_events", "mcp_clients", "audit_logs", "qa_rules", "qa_runs", "qa_issues",
     "ai_provider_configs", "skills", "releases", "release_snapshots",
+    "screen_mockups", "screen_mockup_markers",
 }
 
 HEADER = """
