@@ -19,6 +19,8 @@ import { TranslationsService } from './modules/translations/translations.service
 import { SyncController } from './modules/sync/sync.controller';
 import { TokensController } from './modules/tokens/tokens.controller';
 import { QaController } from './modules/qa/qa.controller';
+import { MockupsController } from './modules/mockups/mockups.controller';
+import { MockupsService } from './modules/mockups/mockups.service';
 import { QaService } from './modules/qa/qa.service';
 import { ContentController } from './modules/misc/content.controller';
 import { PlatformController } from './modules/misc/platform.controller';
@@ -40,6 +42,7 @@ import { UsersService } from './modules/users/users.service';
     SyncController,
     TokensController,
     QaController,
+    MockupsController,
     ContentController,
     PlatformController,
     McpController,
@@ -55,6 +58,7 @@ import { UsersService } from './modules/users/users.service';
     ProjectsService,
     TranslationsService,
     QaService,
+    MockupsService,
     OrganizationsService,
     UsersService,
     WebhooksService,

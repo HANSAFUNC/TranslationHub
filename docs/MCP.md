@@ -79,7 +79,7 @@ Web 端「MCP 管理 → 接入教程」是同一份流程，且会用**你自�
 export LOCALEHUB_TOKEN="lh_mcp_…"   # 存进环境变量，不要提交到 Git
 ```
 
-**第 2 步：拿到你的 `project_id`。** 18 个工具里有 16 个把它当第一个参数，而它是个 UUID——
+**第 2 步：拿到你的 `project_id`。** 19 个工具里有 17 个把它当第一个参数，而它是个 UUID——
 不能靠猜。
 
 两种拿法：
@@ -157,10 +157,12 @@ claude mcp add --transport http localehub-remote http://localhost:3003/mcp \
 工具：`list_projects`、`get_project`、`list_project_locales`、`search_translation_keys`、
 `get_translation_entry`、`get_glossary`、`search_translation_memory`、`translate_entries`、
 `review_translation_entries`、`get_qa_issues`、`update_translation_draft`、`submit_review`、
-`get_project_sync_status`、`get_pending_platform_changes`、`validate_release`。
+`get_project_sync_status`、`get_pending_platform_changes`、`validate_release`、`create_project`、
+`import_translations`、`mark_applied`、`upload_screen_mockup`。
 
-工具标注（MCP `annotations`）：`translate_entries`、`review_translation_entries`、
-`update_translation_draft`、`submit_review` 声明 `readOnlyHint: false`，其余 11 个为只读。
+工具标注（MCP `annotations`）：`create_project`、`import_translations`、`translate_entries`、
+`review_translation_entries`、`update_translation_draft`、`submit_review`、`mark_applied`、
+`upload_screen_mockup` 声明 `readOnlyHint: false`，其余 11 个为只读。
 客户端据此可以判断哪些调用会改动平台数据。
 
 约束：
@@ -201,6 +203,7 @@ MCP 的写工具与 REST 写入**同一张 `audit_logs`**，所以「谁在什�
 | `update_translation_draft`   | `translation.draft_update`  | key、locale、新版本 id（仅真正发生改动时）           |
 | `submit_review`              | `translation.submit_review` | 提交数、跳过数、备注                                 |
 | `mark_applied`               | `sync.apply`                | `via: mark_applied`、条数、跳过原因、git commit      |
+| `upload_screen_mockup`       | `mockup.upload`             | `via`、屏幕名、端、标记数、未匹配数、字节数、**服务端读出的格式** |
 
 - `actor_type` 为 `mcp`，`actor_id` 是 Token 所属用户，`mcp_client_id` 是具体那一把 Token
   ——「有人半夜推了四十个 key」因此能落到「哪把 Token」，可以直接撤销它。
@@ -266,6 +269,7 @@ apply report，所以 Agent 的落地在同步历史里和人跑 CLI 的落地�
 | `update_translation_draft`   | `translation.write`                         |
 | `review_translation_entries` | `translation.review`                        |
 | `mark_applied`               | `translation.apply`                         |
+| `upload_screen_mockup`       | `sync.push`（与 `import_translations` 同类：把本地读到的内容送上来） |
 
 其余工具与 REST 对应路由一致：只需要角色。`translation.apply` 不在默认 scope 集合里，所以默认签发的
 Token 推得上去、落不下来——这正是规格要的分离。
@@ -333,6 +337,65 @@ Token 推得上去、落不下来——这正是规格要的分离。
 
 **痕迹留在三处**：返回值、`sync.push` 审计行（`localesAdded` / `localesMatched` / `platformsAdded`），以及
 CLI 的 `localehub scan` 输出（`expanded` 字段直接给中文说明）。「这个 zh-Hant 是哪来的」因此有答案。
+
+### 2.10 界面草图：Key 说不出的那一半
+
+`checkout.pay_now` 到了译者手上是三个词，没有按钮。key 的身份里（项目 + platform + namespace + key）
+没有任何位置信息，所以「这句话在界面上出现在哪、多大、旁边是什么」从来不在平台里——翻译编辑器只能
+并排显示原文和译文，剩下的靠译者想象。
+
+`upload_screen_mockup` 补的就是这一半：一张界面草图 + 每个 key 的文字在图上的位置。
+
+```jsonc
+{
+  "project_id": "...",
+  "name": "checkout",           // 屏幕的身份：同名再传 = 整体替换
+  "platform": "ios",            // 这张图的端；同名 key 在多个端都存在时优先取该端那条
+  "locale": "en-US",            // 图里文字用的语言，通常就是 sourceLocale
+  "image_base64": "…",          // SVG / PNG / JPEG，解码后 ≤ 2 MB
+  "markers": [
+    { "key": "checkout.pay", "x": 0.06, "y": 0.87, "width": 0.88, "height": 0.07, "text": "Pay now" }
+  ],
+  "replace": true
+}
+```
+
+几条不肯让步的规则：
+
+- **坐标是比例（0~1），不是像素。** 同一张图在 400px 的弹窗里和全屏下必须落在同一处，设计师换 2x
+  导出也不该让所有标记作废。传像素会被拒绝，错误信息说明该传什么——这是调用端最容易犯的错。
+- **格式由字节决定，不由 `mime_type` 决定。** 声明的类型只是一句声明：一个文本文件自称
+  `image/png` 会被按内容识破。服务端还会读真实像素尺寸（PNG 的 IHDR、JPEG 的 SOF、SVG 的
+  viewBox），因为「小于 2 MB」不等于「画得出来」——200 KB 的纯色 PNG 可以是 30000×30000。
+- **只收 SVG / PNG / JPEG。** WebP 不是漏了：平台读不出它的尺寸，就不敢把「大小」这件事交给调用端
+  的一面之词。
+- **SVG 里不能有 `<script>`、事件属性、`<foreignObject>` 或 `xml-stylesheet`。** 草图只需要图形和
+  文字。拒绝时列出要删的东西；此外图片以 `image/svg+xml` 返回时带 `sandbox` 的 CSP 与 `nosniff`，
+  编辑器一律用 `<img>` 渲染——三层各自独立，任何一层单独失效都不会变成可执行的脚本。
+- **指向还没导入的 key 是正常的。** 草图常在读仓库的过程中就画好了，所以这类标记会**存下来**并在
+  返回值 `markers.unmatched` 里报告，编辑器把它显示为「平台没有这个 Key」。之后
+  `import_translations` 把 key 导进来，标记自动对上译文，不需要重传草图——反过来（先要求 key 存在）
+  等于要求先有译文才能画界面，把顺序完全弄反了。
+- **屏幕名是身份。** 同名同端再传一次是整体替换（图与标记一起换）。Agent 重新生成一版不该留下
+  `checkout-2`、`checkout-final`；确实想并存就换个名字，或者传 `replace: false` 让平台报冲突。
+- **标记按 key + namespace 匹配，不按端。** 一个界面只画一次，`platform` 是这张图的标签。同一 key
+  名在多个端都有时优先取该端那条；取到别的端时编辑器会直接标出来（「Key 在 web，不在 ios」），
+  而不是假装没看见。
+
+  为什么不做成按端严格匹配：**目前任何调用方填的 platform 都到不了 key 的身份上**。
+  `scanEntrySchema` 里没有 `platform` 字段，于是 `toScanEntry`（CLI）与 MCP 导入都把它丢掉了，
+  `parseScanEntries` 一律回落到 `web`。实测：库里 19,436 条 key **全部**是 `web`，包括
+  `project_platforms` 为 `{ios, web}` 的「高研院iOS」项目 —— 它 2,792 条 key 的 platform 也是
+  `web`，一条 `ios` 都没有。在这件事解决之前按端严格匹配，等于让每一张如实填写端的草图都匹配不上。
+
+  这是平台侧的一处**已知缺陷**，本次没有一并修：修它（让条目真的带上自己的 platform）会让下一次
+  全量推送把已有的 `web` key 全部判成「本地已删除」，并另建一套 `ios` key——对任何已经同步过的项目
+  都是一次数据迁移，超出本次改动范围。真要修需要先回填：按 `repository_file_mappings` 把已有 key 的
+  platform 从 `web` 改成映射里声明的端，再改 `scanEntrySchema` 与两个 serializer。
+
+编辑器那一侧：翻译编辑器标题栏的「界面草图」按钮打开一个 90% 视口的详情页，左边是按标记框住的界面，
+右边是该语言下的同一批条目，**两边双向联动**（点标记跳到条目、点条目点亮标记），编号是它们之间的暗号。
+标记框用琥珀色标出「草图有文字、译文还是空的」，所以一张图扫下来就知道哪几处还没翻。
 
 ## 3. 本地仓库操作：CLI（不是 MCP）
 
@@ -403,7 +466,7 @@ Server 每个请求建一次（无状态），所以 Skill 是**实时**的：�
 不需要重启任何客户端。
 
 取数走数据库、受 RLS 约束，与 `GET /skills` 的可见性规则一致。查询失败时只记 stderr 并返回空清单
-——Skill 是附加能力，不能因为读不到它而让 18 个工具一起报错。
+——Skill 是附加能力，不能因为读不到它而让 19 个工具一起报错。
 
 ## 5. Token 与 Scope
 

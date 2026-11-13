@@ -81,6 +81,24 @@ export class ApiExceptionFilter implements ExceptionFilter {
         };
       }
     }
+    // `body-parser` refuses an oversized or malformed body with an http-errors object rather than a
+    // Nest exception, and it carries the status it wants. Answering 500 for "your request was too
+    // large" told the caller nothing actionable; the status it asked for is the right one.
+    const httpError = exception as { status?: unknown; statusCode?: unknown; type?: unknown };
+    const parserStatus = typeof httpError.status === 'number' ? httpError.status : httpError.statusCode;
+    if (typeof parserStatus === 'number' && parserStatus >= 400 && parserStatus < 500) {
+      return {
+        status: parserStatus,
+        body: {
+          success: false,
+          error: {
+            code: ErrorCode.VALIDATION_ERROR,
+            message: exception instanceof Error ? exception.message : 'Invalid request body',
+            requestId,
+          },
+        },
+      };
+    }
     const message = exception instanceof Error ? exception.message : 'Unexpected error';
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,

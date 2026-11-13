@@ -6,8 +6,10 @@ import {
   SyncService,
   assertPlaceholdersPreserved,
   createProject,
+  decodeMockupImage,
   recordAudit,
   emitProjectEvent,
+  upsertScreenMockup,
   upsertTranslation,
 } from '@localehub/domain';
 import { renderLocalConfig } from '@localehub/workspace';
@@ -124,7 +126,19 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     'update_translation_draft',
     'submit_review',
     'mark_applied',
+    'upload_screen_mockup',
   ]);
+
+  /**
+   * Tools whose call can destroy what is already on the platform.
+   *
+   * `upload_screen_mockup` replaces a same-named screen wholesale — image and every marker — and keeps
+   * no history, so it is the one write whose `destructiveHint` is true. It is not a dry-run tool
+   * either, which the server instructions say explicitly rather than leaving the general "all writes
+   * default to dry run" sentence to mislead a caller into previewing a regenerated screen onto the
+   * live one.
+   */
+  const DESTRUCTIVE_TOOLS = new Set<RemoteMcpTool>(['upload_screen_mockup']);
 
   /**
    * Record one audit row for a write.
@@ -154,9 +168,14 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
       shape?: Record<string, unknown>;
       _def?: { schema?: { shape?: Record<string, unknown> } };
     };
-    // None of these destroy anything (versions are immutable, review decisions are reversible), so
-    // `destructiveHint` stays false; they are simply not read-only.
-    const annotations = WRITE_TOOLS.has(name) ? { readOnlyHint: false, destructiveHint: false } : { readOnlyHint: true };
+    // Most of these destroy nothing (versions are immutable, review decisions are reversible), so
+    // `destructiveHint` stays false; they are simply not read-only. `upload_screen_mockup` is the
+    // exception: it replaces a same-named screen's image *and* markers with no version history, so a
+    // client is told the truth about it rather than being left to infer it from the description.
+    const destructive = DESTRUCTIVE_TOOLS.has(name);
+    const annotations = WRITE_TOOLS.has(name)
+      ? { readOnlyHint: false, destructiveHint: destructive }
+      : { readOnlyHint: true };
     registerTool(
       name,
       { description, inputSchema: schema.shape ?? schema._def?.schema?.shape ?? {}, annotations },
@@ -837,6 +856,109 @@ export async function buildRemoteMcpServer(actor: ActorContext, prisma: PrismaCl
     async (input: { project_id: string; locales?: string[]; fail_on?: string }) => {
       assertRole(actor, input.project_id, Role.READONLY);
       return sync.validateForRelease(input.project_id, actor);
+    },
+  );
+
+  /**
+   * The half of context a key cannot carry.
+   *
+   * The platform cannot see the caller's screen, so the caller draws it: a sketch of the UI plus one
+   * marker per key showing where its text sits. The translation editor then shows the sketch and the
+   * translations side by side, in both directions — click a marker, the translation is selected;
+   * select a translation, its markers light up.
+   *
+   * Stored and returned exactly as the REST route does it, because it is the same domain function.
+   */
+  define(
+    'upload_screen_mockup',
+    '上传一张界面草图（SVG/PNG/JPEG）＋若干标记，标出每个 key 的文字在界面上的位置。' +
+      '平台的翻译编辑器会用它在译文旁边显示界面，点标记跳到对应译文。' +
+      '坐标是相对图片的比例 0~1（不是像素）；key 可以还没导入，会作为 unmatched 报告而不是拒绝。',
+    async (input: {
+      project_id: string;
+      name: string;
+      platform?: string;
+      locale: string;
+      image_base64: string;
+      mime_type?: string;
+      width?: number;
+      height?: number;
+      markers: {
+        key: string;
+        namespace?: string;
+        x: number;
+        y: number;
+        width?: number;
+        height?: number;
+        text?: string;
+        note?: string;
+      }[];
+      replace: boolean;
+    }) => {
+      assertRole(actor, input.project_id, Role.DEVELOPER);
+      assertProjectBound(actor, input.project_id);
+
+      // Decoded before the transaction opens: a malformed or oversized upload should be refused
+      // without holding a database connection, and the error it throws already names the construct to
+      // remove or the limit that was passed.
+      const image = decodeMockupImage({
+        imageBase64: input.image_base64,
+        mimeType: input.mime_type ?? null,
+        width: input.width ?? null,
+        height: input.height ?? null,
+      });
+
+      const result = await tenant.withOrganization(actor.organizationId, (tx) =>
+        upsertScreenMockup(tx, {
+          organizationId: actor.organizationId,
+          projectId: input.project_id,
+          userId: actor.userId,
+          name: input.name,
+          platform: (input.platform ?? 'web') as never,
+          locale: input.locale,
+          image,
+          // `namespace` carries a schema default, and a client is free to omit it; filling it here
+          // means the domain function always receives the shape its type declares.
+          markers: input.markers.map((marker) => ({ ...marker, namespace: marker.namespace ?? '' })),
+          replace: input.replace,
+        }),
+      );
+
+      await audit({
+        action: 'mockup.upload',
+        resourceType: 'screen_mockup',
+        resourceId: result.mockupId,
+        projectId: input.project_id,
+        metadata: {
+          via: 'upload_screen_mockup',
+          name: result.name,
+          platform: result.platform,
+          locale: result.locale,
+          markers: result.markers.total,
+          unmatched: result.markers.unmatched.length,
+          bytes: result.image.byteSize,
+          // The format the server read from the bytes, and what the caller called it. Recorded on
+          // purpose: a caller that keeps declaring the wrong type is worth noticing.
+          detectedMimeType: result.image.mimeType,
+          declaredMimeType: image.declaredMimeType,
+        },
+      });
+
+      return {
+        ...result,
+        // A marker pointing at a key the platform has not imported is normal — the sketch is often
+        // drawn while the repository is still being read — so the response says what to do about it
+        // rather than treating it as a failure.
+        nextSteps: result.markers.unmatched.length
+          ? [
+              `有 ${result.markers.unmatched.length} 个标记指向平台上还没有的 key：${result.markers.unmatched
+                .slice(0, 5)
+                .map((row) => (row.namespace ? `${row.namespace}:${row.key}` : row.key))
+                .join('、')}${result.markers.unmatched.length > 5 ? ' 等' : ''}。`,
+              '用 import_translations 把对应的语言文件导入后，这些标记会自动对上译文，不需要重新上传草图。',
+            ]
+          : ['草图已保存。在翻译编辑器里点「界面草图」可以并排查看，点标记或条目会互相跳转。'],
+      };
     },
   );
 

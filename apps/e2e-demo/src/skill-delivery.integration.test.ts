@@ -274,10 +274,11 @@ describe('the registry page agrees with the servers', () => {
 
     // One MCP. A `local` key here would advertise a server that does not exist any more.
     expect(discovery.data).not.toHaveProperty('local');
-    // 15 platform tools from spec §6.4, plus the two bootstrap tools and `mark_applied`.
+    // 15 platform tools from spec §6.4, plus the two bootstrap tools, `mark_applied` and
+    // `upload_screen_mockup`.
     // Pinned on purpose: a tool added to the contract but never registered here would otherwise
     // pass unnoticed, because this endpoint reads the contract rather than the server.
-    expect(discovery.data!.remote).toHaveLength(18);
+    expect(discovery.data!.remote).toHaveLength(19);
     const liveTools = (await client!.listTools()).tools.map((tool) => tool.name);
     for (const tool of discovery.data!.remote as { name: string }[]) {
       expect(liveTools).toContain(tool.name);

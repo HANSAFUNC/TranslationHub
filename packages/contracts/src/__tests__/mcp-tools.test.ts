@@ -4,6 +4,7 @@ import { REMOTE_MCP_TOOL_SCOPES, REMOTE_MCP_TOOLS, remoteToolSchemas } from '../
 import { localeDisplayName, resolveLocaleTag } from '../locale';
 import { COMMON_LOCALES, localeLabel } from '../locale-catalog';
 import { ALL_MCP_SCOPES } from '../roles';
+import { toJsonSchema } from '../mcp-schema-export';
 
 /**
  * The registry is what the discovery endpoint, the server and the docs all read, so a mistake here
@@ -41,6 +42,44 @@ describe('the Remote MCP tool registry', () => {
       'sync.preview',
       'sync.push',
     ]);
+  });
+
+  it('gates upload_screen_mockup on sync.push, because it is repository content going up', () => {
+    expect(REMOTE_MCP_TOOL_SCOPES.upload_screen_mockup).toEqual(['sync.push']);
+  });
+
+  it('describes upload_screen_mockup with the fields a caller cannot guess', () => {
+    type Described = { description?: string; default?: unknown };
+    const schema = toJsonSchema(remoteToolSchemas.upload_screen_mockup) as {
+      properties: Record<string, Described>;
+      required?: string[];
+    };
+
+    expect(Object.keys(schema.properties).sort()).toEqual([
+      'height',
+      'image_base64',
+      'locale',
+      'markers',
+      'mime_type',
+      'name',
+      'platform',
+      'project_id',
+      'replace',
+      'width',
+    ]);
+
+    // Markers are fractions of the image, and a caller that assumes pixels produces a sketch whose
+    // markers all sit in one corner. The description is the only place it can learn otherwise.
+    expect(schema.properties.markers!.description).toContain('0~1');
+    expect(schema.properties.markers!.description).toContain('不是像素');
+    // A default the caller cannot see is the failure mode this whole file exists for: `platform`
+    // decides whether the markers find their keys at all, and `replace` decides whether a second
+    // upload of the same screen overwrites it or is refused.
+    expect(schema.properties.platform!.description).toContain('默认 web');
+    expect(schema.properties.replace!.default).toBe(true);
+    expect(schema.properties.name!.description).toContain('替换');
+    // The format is read from the bytes, so declaring it is optional and cannot do harm.
+    expect(schema.required ?? []).not.toContain('mime_type');
   });
 
   it('describes mark_applied as a write, with the version each item claims to have written', () => {

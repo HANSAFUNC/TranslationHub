@@ -991,6 +991,106 @@ POST /organization/members (READONLY)          # 无 token 管理成员的越权
 
 ---
 
+### 1.35 翻译编辑器：界面草图详情页（本轮）
+
+用户要求：「翻译编辑器可以加一个按钮打开一个 90% 的详情页，左边是 mcp 调用端上传的生成界面草稿图，
+界面草稿图要根据调用端的源语言在当前界面位置标记出来，右边是译文，点击标记会去到对应的翻译互相联动」。
+
+**缺的不是词，是位置。** `checkout.pay_now` 到了译者手上是三个词，没有按钮：key 的身份是
+`(项目, platform, namespace, key)`，里面没有任何位置信息。所以新增的是「Key 说不出的那一半」：
+一张界面草图 + 每个 key 的文字在图上的位置。
+
+**上传端（Remote MCP 第 19 个工具 `upload_screen_mockup`，scope `sync.push`，进审计）**
+
+- 入参：屏幕名、端、草图语言、图片（base64）、标记数组。图片支持 SVG / PNG / JPEG。
+- **坐标是相对图片的比例 0~1，不是像素**——同一张图在 400px 弹窗和全屏下必须落在同一处，换 2x 导出
+  也不该让标记作废。传像素会被拒绝，错误信息说明该传什么（调用端最容易犯的错）。
+- **格式由字节决定**：`detectImageType` 读魔数，声明的 `mime_type` 只作为「调用方声称」记进审计。
+  WebP 明确不收——平台读不出它的像素尺寸，就不敢把「大小」交给调用端的一面之词。
+- **像素尺寸真的读**（PNG 的 IHDR、JPEG 的 SOF 逐段扫描、SVG 的 viewBox）：字节数不等于画得出来，
+  200 KB 的纯色 PNG 可以是 30000×30000，上限 8192 是按名字拒绝而不是让浏览器去画。
+- **SVG 里的 `<script>` / 事件属性 / `<foreignObject>` / `xml-stylesheet` / `<!ENTITY>` 一律拒绝**，
+  并列出要删的东西。另外两层：图片以 `image/svg+xml` 返回时带 `sandbox` 的 CSP 与 `nosniff`，
+  编辑器一律用 `<img>` 渲染——三层各自独立。
+- **指向尚未导入的 key 不失败**：标记照存，返回值 `markers.unmatched` 报告，编辑器显示「平台没有这个
+   Key」。草图常画在导入之前，要求 key 先存在等于把顺序弄反。
+- 同名同端再传 = 整体替换（图与标记一起换）；`replace: false` 则报 `CONFLICT`。
+
+**读取端**：`GET /projects/:id/mockups`（`?key=` 时每行附 `containsKey`，回答「我选中的这条在哪个
+界面上」）、`GET …/:mockupId?locale=`（标记 join 源文与该语言的译文，按阅读顺序排序）、
+`GET …/:mockupId/image`（字节 + ETag + 304 + 三层安全头）。上传/删除同路由也开了（DEVELOPER），
+与 MCP 走**同一个** `@localehub/domain` 函数——一个上传在两个入口上一个有效一个无效是不可能的。
+
+**编辑器**：标题栏「界面草图」按钮打开 90% 视口的详情页。左边是按标记框住的草图，右边是该语言的同一批
+条目，**双向联动**：点标记 → 右侧滚动并高亮该条；点条目 → 标记点亮。编号是两侧的暗号。琥珀色框表示
+「草图有字、译文还空着」，所以一张图扫下来就知道哪几处没翻。有 `entryId` 的条目可以「在编辑器中打开」
+（关掉弹窗并选中该条——详情面板是按 id 取的，所以不在当前页也能打开）。多屏时按名字切换。
+
+实测：**13 个新集成测试**（MCP 上传 → REST 读取 → 图片字节与安全头 → 标记 join → `containsKey` →
+替换语义 → CONFLICT → SVG 拒绝 → 像素坐标拒绝 → REST 平权 → 大请求体 → 审计 → scope 强制 →
+路径里的 projectId 与行不一致时 404）、**31 个新单元测试**（几何规则、魔数与尺寸解析、SVG 危险构造、
+解码与上限）。全量：257 单元 + 150 集成测试通过。
+
+**浏览器实测（无头 Chrome，容器栈 :3000）**：弹窗 1296×810（1440×900 视口的 90%），375×812 的草图
+渲染为 323×699，**7 个标记 7 个都落在图内**，右侧 7 行；点第 3 个标记 → 对应行滚入视野并高亮（`rowFound`
+与 `rowHighlighted` 均为 true），点最后一行 → 对应标记点亮（`markerFound` / `markerHighlighted` 均为
+true）；390×844 窄屏下弹窗 367×776、`scrollWidth == clientWidth`（无横向溢出）；控制台无 error、无异常。
+截图：`/tmp/mockup-dialog.png`、`/tmp/mockup-dialog-mobile.png`。
+
+**其中三个缺陷只有浏览器看得见**——两端的单元/集成测试全绿，因为出问题的是「浏览器拿到的东西」：
+
+| 缺陷 | 症状 | 原因与修复 |
+| --- | --- | --- |
+| `imagePath` 多一层前缀 | 弹窗左半边显示「草图加载失败」 | 服务端返回 `/api/v1/projects/...`，而浏览器端的 `api.ts` 会自己再拼一次 `/api/v1`，请求打到 `/api/v1/api/v1/...` 而 404。改成返回相对路径（与其它接口里的 URL 一致），并加了一条集成断言：`imagePath` 不以 `/api/v1` 开头 |
+| 草图被压成 2×2 像素 | 七个标记全叠在一个点上 | 百分比标记的遮罩层必须**就是**那张图。原写法用 `inline-block` 包住 `<img>` 再给它 `max-w-full`——百分比 max-width 对「由内容决定宽度」的父元素求解，浏览器把这个循环解成 0。改为用服务端读出的尺寸给遮罩层设 `aspect-ratio` + `height: 100%` + `max-w-full`，`<img>` 用 `absolute inset-0 h-full w-full` 填满它；尺寸未知时回退到旧分支 |
+| 点击毫无反应 | 点标记、点行都不动，看起来像「联动没做」 | 两侧约定的身份串用 `\u0000` 分隔后写进 `data-marker`，而 `CSS.escape` 会把 NUL 替换成 U+FFFD，`querySelector` 因此永远匹配不到元素。分隔符换成 namespace 不可能出现的 `\u001f` |
+
+第三条尤其值得留档：集成测试断言了标记 join 的顺序与内容，全绿；断掉的是**组件读回自己写下的属性**
+这一步，只有真的去点一下才会暴露。
+
+**代码评审又找出 16 个问题，全部已修**（其中 4 个在运行中的栈上被复现）。按严重程度：
+
+| 问题 | 症状（已验证） | 修复 |
+| --- | --- | --- |
+| **上传不校验项目归属**（最严重） | 组织 A 的成员用组织 B 的项目 id 上传：行写进去了（A 的 organization_id + B 的 project_id）。RLS 让 B 看不见这一行，但 `(project_id, platform, name)` 唯一索引**不按租户隔离**——A 于是永久占住 B 的一个屏幕名，B 自己传同名草图得到 `CONFLICT`。未知项目 id 则撞外键，返回 500 并带上 Prisma 原文 | `upsertScreenMockup` 在事务内先按租户查项目，查不到即 404。REST 与 MCP 共用这一个函数，所以两个入口一起修好 |
+| **SVG 的 `<svg:script>` 绕过检查** | 黑名单只认无前缀的 `<script>`；`<svg:script>alert(1)</svg:script>` 通过并入库，作为文档打开时脚本真的执行了 | 元素名允许命名空间前缀（`<svg:script>`、`<x:foreignObject>` …）。另：SVG 不再走 `blob:` URL（`blob:` 是同源可导航文档，「在新标签页打开图片」会在本应用源上执行文件里的脚本，而 API 的 sandbox CSP 只管 API 自己的 URL）——SVG 改为 `data:` URL，PNG/JPEG 仍用 object URL |
+| **横屏草图被拉伸** | `height:100%` + `aspect-ratio` + `max-w-full`：宽度被 clamp 时高度仍是确定值，1440×900 的草图渲染成 655×778（比例 0.84，应为 1.60）。竖屏恰好正确，所以上次只测竖屏没发现 | 左栏设为 size container，盒子宽 `min(100%, calc(100cqh * 比例))` —— 两个方向同时受限，比例永远成立 |
+| **`stroke-width` 被当成图片宽度** | `\bwidth=` 中 `\b` 把连字符当词边界，`<svg stroke-width="2" width="375">` 读成 2×375；根元素没写尺寸时会退而取第一个子元素的尺寸（实测 327×48）。这个错误尺寸正是编辑器用来算 `aspect-ratio` 的输入 | 只在根 `<svg>` 标签内解析，且用 `(?<![\w-])width` 排除 `stroke-width`；子元素一律不看 |
+| **全局 4 MB 请求体** | 为了让草图能传上去，之前把 JSON 解析上限对整个应用抬到 4 MB：`/auth/login` 等路由在 AuthGuard 与限流器之前就先缓冲解析 4 MB；解析失败还因为注册在 CORS 之前而**没有 CORS 头**（跨域部署下浏览器只报不透明的网络错误），超限返回 500 而非 413 | 大解析器只挂 `/projects/:projectId/mockups` 这一条路由，注册在 CORS 之后；其余路由保持 100 kB。手工挂载的中间件绕过 Nest 异常过滤器，所以超限/格式错误在这里直接按统一信封回 413 |
+| **`?key=` 只比 key 名** | Key 的身份是 `(namespace, key)`，只比名字时「同名但属于另一个 namespace」的屏幕会回答 `containsKey: true`，编辑器于是打开错误的屏幕并高亮错误的标记 | 列表接口接受 `namespace` 并按其匹配；编辑器同时传 `key` 与 `namespace`；前端聚焦标记也按身份比对 |
+| **重新打开对话框保留上一次的屏幕** | 选择逻辑「当前屏幕还在列表里就留着」，于是第二次打开时虽然带着新的 `?key=` 重新问了，却仍停在上次的屏幕上 | 每次打开都重置所选屏幕，让 `containsKey` 的答案重新决定 |
+| **`<img>` 后按方向键会改动对话框背后的编辑器** | 焦点在标记按钮上时，窗口级 ↑/↓ 监听仍会切换选中的条目并 `preventDefault()`，弹窗里的按键因此失效 | 对话框打开时该监听直接返回 |
+| **SVG 以注释/DOCTYPE 开头时被拒** | 导出工具常在根元素前写 `<!-- … -->` 或 `<!DOCTYPE svg …>`，两者都被判为「无法识别的图片，WebP 不支持」 | 允许根元素前的合法 XML 序言（声明/DOCTYPE/注释/空白），其余仍拒绝 |
+| **`data:` URL 带参数时被拒** | `data:image/svg+xml;charset=utf-8;base64,…` 报「不是合法 base64」——把参数当成了载荷 | 参数段允许出现 |
+| **审计与校验在两个入口不一致** | `detectedMimeType` / `declaredMimeType` 只有 MCP 路径记；REST 的 `mimeType` 接受任意字符串，同一个 `image/jpg` 在 MCP 被拒、在 REST 被收下 | REST 审计补同样两个字段；`mimeType` 收敛为三种真实格式 |
+| **按名字替换的竞态** | 先查后写：两个同名上传并发时都读到「不存在」，输的那个撞唯一索引并返回 `CONFLICT`，把一次合法的 `replace: true` 报成冲突 | 写入改为按唯一索引 `upsert`，由索引仲裁；`replace: false` 的拒绝语义仍由前置查询给出 |
+| **304 也要读整张图** | 图片响应是 `no-cache` + ETag，所以每次打开都在重新校验；即使命中 304，也先把最多 2 MB 的 BYTEA 读进内存再丢掉 | 先只取 `contentHash`/`mimeType` 比对 ETag，未命中才取字节；`Buffer.from(image.buffer, …)` 不再复制 |
+| **`upload_screen_mockup` 与「写操作默认 dry run」矛盾** | 服务端 instructions 对所有客户端说「所有写操作默认 dry run」，而它没有 dry run 且 `replace` 默认 true，会把已有草图与标记一起覆盖 | instructions 明确写出这一例外（别拿它试），工具声明 `destructiveHint: true` |
+| **`/mcp` 教程页数字过期** | 页面写「十八个工具里有十六个」，而注册表与文档都是 19 / 17 | 改为十九 / 十七 |
+
+四个在运行栈上复现的问题（跨租户写入、`<svg:script>`、横屏拉伸、`stroke-width`）现在都有回归测试：契约层的检测与尺寸、域层的租户校验与 `data:` URL、以及集成层的「外组织项目 404 且没写任何行」「不存在的项目 id 返回 404 而不是 500」「5 MB 请求体得到 413 与统一信封」「`?key=&namespace=` 区分同名不同 namespace」。
+
+**修这些修复时又踩了一个自己造的坑，值得记下**：把大请求体解析器按路由挂上去（`app.use('/api/v1/projects/:projectId/mockups', json({limit:'4mb'}))`）之后，`/auth/login` 开始对正确密码返回 422 `email: Required`。原因是 Nest 用它**自己的**解析器时靠「栈里有没有一个叫 `jsonParser` 的中间件」来判断要不要注册全局限定器（`ExpressAdapter.isMiddlewareApplied`），而 `json({…})` 返回的函数正好就叫 `jsonParser`——Nest 于是认为「已经装过了」，全应用再没有任何 body 解析。症状不止一处：登录体解析不到，限流器的「按 (IP, 账号)」桶也退化成所有登录共用一个 `unknown` 桶，于是连续跑集成测试必然 429。改法是把解析器包一层、给一个 Nest 不认识的名字（`mockupBodyParser`），Nest 就会照常注册自己的 100 kB 全局解析器，而 body-parser 见到已解析的请求会跳过，两条路径互不干扰。实测四条：小草图 201、400 kB 草图 201（旧的 100 kB 默认会拒）、5 MB 413 且是统一信封、`/auth/login` 上传 150 kB 仍被 100 kB 默认拒。
+
+横屏修复也在浏览器里量过：1440×900 的草图，盒子 798×499（比例 1.600，与图片一致；修复前是 0.84），375×812 的仍是 364×789（0.462），两者都是 7/7 标记落在图内、右侧 7 行；点标记↔点条目的双向联动仍为 true，窄屏无横向溢出，控制台无异常。
+
+顺带修掉的一个「不是缺陷但会挡住它」的问题：API 的 JSON 请求体默认上限是 Express 的 100 kB，而一张
+草图经 base64 之后轻易超过它——`POST /projects/:id/mockups` 会以 413 拒掉一张正常的线框图。已在
+`main.ts` 提到 4 MB，与 MCP 传输层的上限一致，并加了一条 180 kB 载荷的回归测试。
+
+**顺带发现、但这次没有修的问题（重要）**：`scanEntrySchema` 里没有 `platform` 字段，`toScanEntry`
+（CLI）与 MCP 导入都没有把条目的 platform 传上来，`parseScanEntries` 一律回落到 `web`。实测数据库：
+**19,436 条 key 全部是 `web`**；`project_platforms` 为 `{ios, web}` 的「高研院iOS」项目，其 2,792 条
+key 的 platform 也全是 `web`，一条 `ios` 都没有。也就是说：**调用方填的 platform 从来没有到达 key 的
+身份上**，而 `docs/MCP.md` 与导入指南都写着「platform 是 key 身份的一部分，必须与仓库配置一致」。
+CLI 的往返仍然是自洽的（读与写两边都按 `web` 走），所以此前没有任何验收项发现它。
+
+修它会让下一次全量推送把已有的 `web` key 全部判成「本地已删除」并另建一套 `ios` key——对任何已同步过的
+项目都是一次数据迁移（需要先按 `repository_file_mappings` 回填已有 key 的 platform），不属于本次改动
+范围，所以没有一并改。**本次的标记匹配因此按 key + namespace 做，不按端**：同名 key 存在于多个端时优先
+取屏幕自己的端，取到别的端会在编辑器里直接标出来（「Key 在 web，不在 ios」），而不是假装没看见。
+详见 `docs/MCP.md` §2.10。
+
 ## 附：最终验证记录（本文件写入后重跑）
 
 | 命令                                             | 结果                                    |
@@ -1040,12 +1140,12 @@ docker buildx build --network host -f docker/web.Dockerfile -t localehub-web .
 
 ## 附二：MCP 传输层实测
 
-平台只有一个 MCP，下表的「工具」一列是它的 18 个平台工具；本地动作在 CLI 里，另表列出。
+平台只有一个 MCP，下表的「工具」一列是它的 19 个平台工具；本地动作在 CLI 里，另表列出。
 
 | 验证                                                | 结果                                                                                            |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | Remote MCP（Streamable HTTP）被真实 MCP Client 连接 | `connected: localehub-remote 0.1.0`                                                             |
-| Remote MCP 工具数                                   | 18（规格 §6.4 的 15 个 + `create_project` / `import_translations` / `mark_applied`，见 §1.27、§1.29） |
+| Remote MCP 工具数                                   | 19（规格 §6.4 的 15 个 + `create_project` / `import_translations` / `mark_applied` / `upload_screen_mockup`，见 §1.27、§1.29、§1.35） |
 | MCP 是否校验 Token scope                            | 是：`REMOTE_MCP_TOOL_SCOPES` 在包装层统一断言，映射逐条对齐 REST（集成测试断言，见 §1.29）      |
 | MCP 是否教怎么用                                    | 是：`instructions` + `localehub://import-guide` + `import-localization-files` 提示词 + 字段级描述（见 §1.30） |
 | 仓库有、平台没有的语言                              | 自动新增并报告；等价标签归入已有语言（`zh-Hans` → `zh-CN`）；歧义则拒绝（见 §1.31） |

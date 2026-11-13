@@ -21,13 +21,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorAlert } from '@/components/error-alert';
 import { PageHeader } from '@/components/page-header';
+import { ScreenMockupButton, ScreenMockupDialog } from '@/components/screen-mockup-dialog';
 import { StatusBadge } from '@/components/status-badge';
 import { timeAgo, useAsync } from '@/components/use-async';
-import { get, post, type TranslationDetail, type TranslationListItem } from '@/lib/api';
+import { get, post, type MockupSummary, type TranslationDetail, type TranslationListItem } from '@/lib/api';
 import { localeDisplayName } from '@localehub/contracts/locale';
 import { cn } from '@/lib/utils';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'PENDING_REVIEW', 'APPROVED', 'STALE', 'REJECTED'] as const;
+/** One shared empty list: a fresh `[]` on every render would churn the dialog's effect deps. */
+const NO_LOCALES: { code: string; name: string }[] = [];
 const PAGE_SIZES = [50, 100, 200] as const;
 
 interface ProjectLocales {
@@ -68,7 +71,12 @@ export default function TranslationsPage() {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<unknown>(null);
+  const [mockupOpen, setMockupOpen] = useState(false);
   const selectedRow = useRef<HTMLTableRowElement | null>(null);
+
+  // Loaded here rather than next to the list because `query` below depends on it: the default
+  // locale is only known once the project's source language is.
+  const { data: project } = useAsync(() => get<ProjectLocales>(`/projects/${projectId}`), [projectId]);
 
   const pageIndex = cursors.length - 1;
   const cursor = cursors[pageIndex] ?? null;
@@ -90,7 +98,6 @@ export default function TranslationsPage() {
     return map.toString();
   }, [filters.locale, filters.status, debouncedSearch, cursor, pageSize]);
 
-  const { data: project } = useAsync(() => get<ProjectLocales>(`/projects/${projectId}`), [projectId]);
   const {
     data: list,
     error,
@@ -100,6 +107,15 @@ export default function TranslationsPage() {
   const { data: detail, reload: reloadDetail } = useAsync(
     () => (selected ? get<TranslationDetail>(`/projects/${projectId}/translations/${selected}`) : Promise.resolve(null)),
     [projectId, selected],
+  );
+
+  // The count on the button, refreshed when the dialog closes so it reflects a sketch an agent
+  // uploaded while the page sat open. Skipped while the dialog is open: it asks the same endpoint
+  // for a richer answer (`?key=` adds `containsKey`), and two identical lists in flight at once is
+  // one more than this page needs.
+  const { data: mockups } = useAsync(
+    () => (mockupOpen ? Promise.resolve(null) : get<MockupSummary[]>(`/projects/${projectId}/mockups`)),
+    [projectId, mockupOpen],
   );
 
   const items = list?.items ?? [];
@@ -138,8 +154,19 @@ export default function TranslationsPage() {
   }
 
   function select(entry: TranslationListItem) {
-    setSelected(entry.entryId);
-    setDraft(entry.value);
+    openEntry(entry.entryId, entry.value);
+  }
+
+  /**
+   * Select an entry by id, with the value the caller already has.
+   *
+   * The sketch dialog knows an entry's id and its text but is not part of the paged list, so it
+   * cannot hand over a `TranslationListItem`. Selecting by id is what the detail pane fetches on
+   * anyway, which is also why "open in the editor" works for an entry that is on another page.
+   */
+  function openEntry(entryId: string, value: string) {
+    setSelected(entryId);
+    setDraft(value);
     setActionError(null);
   }
 
@@ -149,9 +176,12 @@ export default function TranslationsPage() {
   }, [selected, items]);
 
   // ↑/↓ walk the list, and ↓ past the last row turns the page. Skipped while a field has focus, so
-  // arrowing inside the translation box moves the caret as usual.
+  // arrowing inside the translation box moves the caret as usual — and skipped while the sketch dialog
+  // is open, whose own buttons would otherwise move the editor's selection behind the modal (and whose
+  // Escape and arrow handling must not be pre-empted by this global listener).
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (mockupOpen) return;
       if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
@@ -171,7 +201,7 @@ export default function TranslationsPage() {
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [items, selected, goNext]);
+  }, [items, selected, goNext, mockupOpen]);
 
   return (
     <>
@@ -179,10 +209,13 @@ export default function TranslationsPage() {
         title="翻译编辑器"
         description="原文与译文并排；保存草稿后提交审核，审核通过 CLI 才能拉取回写"
         actions={
-          <Button variant="outline" onClick={() => router.push(`/projects/${projectId}/sync`)}>
-            <GitBranch />
-            仓库同步
-          </Button>
+          <>
+            <ScreenMockupButton count={mockups?.length ?? null} onClick={() => setMockupOpen(true)} />
+            <Button variant="outline" onClick={() => router.push(`/projects/${projectId}/sync`)}>
+              <GitBranch />
+              仓库同步
+            </Button>
+          </>
         }
       />
 
@@ -525,6 +558,22 @@ export default function TranslationsPage() {
           </Card>
         ) : null}
       </div>
+
+      <ScreenMockupDialog
+        projectId={projectId}
+        open={mockupOpen}
+        onOpenChange={setMockupOpen}
+        locales={project?.locales ?? NO_LOCALES}
+        sourceLocale={project?.sourceLocale}
+        defaultLocale={filters.locale !== 'ALL' && filters.locale !== project?.sourceLocale ? filters.locale : null}
+        focusEntryId={selected}
+        focusKey={detail?.key ?? null}
+        focusNamespace={detail?.namespace ?? null}
+        onOpenInEditor={(entry) => {
+          openEntry(entry.entryId, entry.value);
+          setMockupOpen(false);
+        }}
+      />
     </>
   );
 }

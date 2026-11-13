@@ -27,6 +27,10 @@
     "./locale-catalog": {
       "types": "./dist/locale-catalog.d.ts",
       "default": "./dist/locale-catalog.js"
+    },
+    "./mockup": {
+      "types": "./dist/mockup.d.ts",
+      "default": "./dist/mockup.js"
     }
   }
 }

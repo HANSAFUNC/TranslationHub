@@ -293,6 +293,7 @@ model Project {
   qaRuns         QaRun[]
   qaIssues       QaIssue[]
   releases       Release[]
+  screenMockups  ScreenMockup[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -1047,4 +1048,82 @@ model ReleaseSnapshot {
 
   @@index([releaseId])
   @@map("release_snapshots")
+}
+
+/* -------------------------------------------------------- screen mockups */
+
+/**
+ * A sketch of a screen, uploaded by whoever can see the UI (an agent reading the checkout).
+ *
+ * Translation keys say *what* a string is; they cannot say *where* it appears. A reviewer looking at
+ * `checkout.pay_now` has to imagine the button. A mockup carries that missing half: one image plus
+ * markers, each marker a rectangle over the place where a key's text sits, so the editor can put the
+ * sketch and the translations side by side and light up both at once.
+ *
+ * The bytes live in the row rather than on disk. Release bundles are written to a directory because
+ * a zip can be tens of megabytes; a sketch is a wireframe or a screenshot of a few hundred kilobytes,
+ * and keeping it in the row means it is covered by the same transaction, the same RLS policy and the
+ * same backup as everything else — no second storage system to keep in sync, and no volume to mount
+ * in the compose stack.
+ */
+model ScreenMockup {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  projectId      String       @map("project_id") @db.Uuid
+  name           String
+  platform       PlatformKind @default(web)
+  /** The language the sketch's text is drawn in. Normally the project's source locale. */
+  locale         String
+  width          Int?
+  height         Int?
+  mimeType       String       @map("mime_type")
+  byteSize       Int          @map("byte_size")
+  contentHash    String       @map("content_hash")
+  image          Bytes
+  createdById    String?      @map("created_by_id") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  project Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  markers ScreenMockupMarker[]
+
+  /** Re-uploading a screen replaces it: the name is the identity, so a regenerated sketch lands on top of the old one. */
+  @@unique([projectId, platform, name])
+  @@index([organizationId])
+  @@map("screen_mockups")
+}
+
+/**
+ * One key's position on a screen.
+ *
+ * Coordinates are fractions of the image (0..1), not pixels: the same marker has to line up whether
+ * the sketch is rendered in a 400px dialog or full screen, and a designer re-exporting at 2x must not
+ * invalidate every marker on the screen.
+ *
+ * `key` + `namespace` are stored as text with no foreign key on purpose. The sketch is often uploaded
+ * *before* the keys exist (the agent drew the screen while reading the repository), and a marker that
+ * points at a key the platform has not imported yet is a fact about the UI, not corruption — the
+ * editor reports it as "平台没有这个 Key" instead of hiding the marker.
+ */
+model ScreenMockupMarker {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  mockupId       String   @map("mockup_id") @db.Uuid
+  key            String
+  namespace      String   @default("")
+  x              Float
+  y              Float
+  width          Float?
+  height         Float?
+  /** The text visible in the sketch at this position — what the caller saw, even if the platform's source text differs. */
+  text           String?
+  note           String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  mockup ScreenMockup @relation(fields: [mockupId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([mockupId])
+  @@index([organizationId, key])
+  @@map("screen_mockup_markers")
 }

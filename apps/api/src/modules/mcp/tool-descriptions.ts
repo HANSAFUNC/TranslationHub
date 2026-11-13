@@ -16,4 +16,5 @@ export const REMOTE_TOOL_DESCRIPTIONS: Record<string, string> = {
   get_project_sync_status: '读取仓库同步状态',
   get_pending_platform_changes: '读取待拉取的平台变更',
   validate_release: '发布前校验',
+  upload_screen_mockup: '上传界面草图＋标记，让译者在译文旁边看到界面（可选）',
 };

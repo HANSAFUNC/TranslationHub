@@ -91,6 +91,41 @@ export const patch = <T>(path: string, body?: unknown) => api<T>(path, { method:
 export const put = <T>(path: string, body?: unknown) => api<T>(path, { method: 'PUT', body: JSON.stringify(body ?? {}) });
 export const del = <T>(path: string) => api<T>(path, { method: 'DELETE' });
 
+/**
+ * Fetch a binary resource and hand back a URL an `<img>` can use.
+ *
+ * The sketches live behind the same authorization as everything else, and an `<img src>` pointing at
+ * the API is not guaranteed to carry the credential: it depends on whether the deployment calls the
+ * API on the same origin, on `SameSite`, and on CORS for images. Going through `fetch` with
+ * `credentials: 'include'` is the same path every other request already takes, so it works the same
+ * way in both deployments — and a failure surfaces as an error the dialog can show instead of a
+ * broken-image icon.
+ *
+ * An SVG becomes a `data:` URL rather than an object URL. Both render identically in an `<img>`, but
+ * a `blob:` URL is a *navigable same-origin document*: "open image in a new tab" on one would run any
+ * script the file contains in this app's origin, with no `Content-Security-Policy` to stop it — the
+ * API's sandbox header applies to the API's own URL, not to a blob made from its bytes. A `data:` URL
+ * is not top-level navigable, so that door is closed for the one format that can carry script. A PNG
+ * or JPEG blob cannot execute anything, so those keep the cheaper object URL.
+ *
+ * The caller owns an object URL and must revoke it; `useObjectUrl` does that.
+ */
+export async function fetchObjectUrl(path: string): Promise<string> {
+  const response = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
+  if (!response.ok) {
+    if (response.status === 401 && typeof window !== 'undefined') window.location.href = '/login';
+    throw new ApiError('MOCKUP_IMAGE_UNAVAILABLE', `Could not load the sketch (${response.status})`, response.status);
+  }
+  const blob = await response.blob();
+  if (!blob.type.includes('svg')) return URL.createObjectURL(blob);
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new ApiError('MOCKUP_IMAGE_UNAVAILABLE', 'Could not read the sketch', 0));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(blob);
+  });
+}
+
 /* ------------------------------------------------------------------ types */
 
 export interface ProjectSummary {
@@ -232,4 +267,45 @@ export interface TokenRecord {
   lastUsedAt: string | null;
   revokedAt: string | null;
   createdAt: string;
+}
+
+/* --------------------------------------------------------- screen mockups */
+
+export interface MockupSummary {
+  id: string;
+  name: string;
+  platform: string;
+  locale: string;
+  width: number | null;
+  height: number | null;
+  mimeType: string;
+  byteSize: number;
+  markerCount: number;
+  updatedAt: string;
+  imagePath: string;
+  /** Present when the list was asked about a specific key. */
+  containsKey?: boolean;
+}
+
+export interface MockupMarker {
+  id: string;
+  key: string;
+  namespace: string;
+  x: number;
+  y: number;
+  width: number | null;
+  height: number | null;
+  text: string | null;
+  note: string | null;
+  /** The platform the key was found on; null when the project has no such key. */
+  platform: string | null;
+  /** The platform's source text for this key; null when the platform has no such key. */
+  source: string | null;
+  entry: { entryId: string; value: string; status: string; revision: number; updatedAt: string } | null;
+}
+
+export interface MockupDetail {
+  mockup: MockupSummary;
+  locale: string | null;
+  markers: MockupMarker[];
 }

@@ -5,6 +5,7 @@ export * from './sync';
 export * from './roles';
 export * from './locale';
 export * from './locale-catalog';
+export * from './mockup';
 export * from './placeholders';
 export * from './keys';
 export * from './schemas';

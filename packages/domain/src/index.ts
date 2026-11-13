@@ -8,3 +8,4 @@ export * from './webhooks';
 export * from './bundles';
 export * from './projects';
 export * from './audit';
+export * from './mockups';

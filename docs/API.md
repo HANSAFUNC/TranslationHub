@@ -121,6 +121,34 @@ public 路由不受影响，负载均衡仍可探测。
 保存草稿会校验占位符一致性，不一致返回 `PLACEHOLDER_MISMATCH`。
 批准 `STALE` 译文返回 `STALE_TRANSLATION`。
 
+### 4.1 界面草图
+
+界面草图是「这个 Key 的文字在界面上出现在哪」：一张 SVG/PNG/JPEG，加每个 Key 的一个矩形标记。
+翻译编辑器用它在译文旁边显示界面，点标记跳到条目、点条目点亮标记。
+
+| Method | Path                                          | 权限                     | 说明                                                       |
+| ------ | --------------------------------------------- | ------------------------ | ---------------------------------------------------------- |
+| GET    | `/projects/:projectId/mockups`                | READONLY                 | 屏幕列表（不含图片字节）；`?key=&namespace=` 时每行附 `containsKey` |
+| GET    | `/projects/:projectId/mockups/:mockupId`      | READONLY                 | 标记（含源文与 `?locale=` 的译文），按阅读顺序排序          |
+| GET    | `/projects/:projectId/mockups/:mockupId/image`| READONLY                 | 图片字节（非 JSON 信封）；带 ETag，可 304                  |
+| POST   | `/projects/:projectId/mockups`                | DEVELOPER + `sync.push`  | 上传/替换屏幕（`imageBase64` + `markers`）                 |
+| DELETE | `/projects/:projectId/mockups/:mockupId`      | DEVELOPER + `sync.push`  | 删除屏幕（标记随外键级联）                                 |
+
+上传的校验与 MCP 的 `upload_screen_mockup` 完全同一份实现（`@localehub/domain`）：坐标是
+相对图片的比例（0~1）而不是像素，格式由字节判断而不是 `mime_type`，SVG 内的
+`<script>` / 事件属性 / `<foreignObject>` 会被拒绝并说明原因。图片以 `image/svg+xml` 返回时
+带 `Content-Security-Policy: … sandbox` 与 `X-Content-Type-Options: nosniff`。
+
+指向平台尚未导入的 Key 的标记会照常保存并在响应里列为 `markers.unmatched` —— 草图通常画在导入
+之前，编辑器把它显示为「平台没有这个 Key」，而不是假装那处不存在。
+
+`?:projectId` 必须属于调用方所在组织：不属于或不存在一律 404（不会写入任何行；`(project_id,
+platform, name)` 的唯一索引不按租户隔离，放行会让他人永久占住一个屏幕名）。上传的 JSON 请求体在这一条
+路由上放宽到 4 MB（其余路由仍是默认的 100 kB），超限返回 413 而不是 500。
+
+`containsKey` 按 `(namespace, key)` 匹配 —— namespace 是 Key 身份的一部分，只按名字会为「同名的另一个
+namespace」回答 yes。
+
 ## 5. 同步（核心）
 
 | Method   | Path                                                                         | Scope               | 说明                                         |

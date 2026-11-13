@@ -14,6 +14,9 @@ pnpm db:seed             # 种子数据（apps/cli/src/seed.ts）
 |---|---|
 | `20261109064837_init` | 全部核心表 + 外键 + **RLS 策略（32 张租户表）** + 角色与授权 |
 | `20261109065342_sync_baseline_local_file` | 同步基线增加本地文件定位列 |
+| `20261111000200_webhooks` | Webhook 端点与投递记录（含 RLS） |
+| `20261113000000_sync_scan_partial` | 同步扫描区分「整个仓库」与「一批」 |
+| `20261114000000_screen_mockups` | 界面草图与标记（含 RLS） |
 
 迁移使用 owner 连接执行（需要 DDL 权限与 shadow database）：
 `DATABASE_URL=$MIGRATE_DATABASE_URL pnpm --filter @localehub/database migrate:deploy`。
@@ -36,6 +39,7 @@ Organization 1─* Project 1─* Locale
                         ├─* SyncApplyReport
                         ├─* ProjectEvent  (单调 revision)
                         ├─* GlossaryTerm / QaRun / QaIssue / Release / ReleaseSnapshot
+                        └─* ScreenMockup 1─* ScreenMockupMarker
 Organization 1─* McpClient / AuditLog / AiProviderConfig / Skill
 ```
 
@@ -51,6 +55,8 @@ Organization 1─* McpClient / AuditLog / AiProviderConfig / Skill
 | `translation_entries` 唯一：`key_id + locale_id` | 一条 Key 一个 Locale 一个当前值 |
 | `sync_apply_reports` 唯一：`session_id + apply_plan_id` | 回写报告幂等 |
 | `projects.revision` 单调递增 | 所有增量拉取的权威游标 |
+| `screen_mockups` 唯一：`project_id + platform + name` | 同名同端再传一次 = 整体替换，不堆积 checkout-2 |
+| `screen_mockup_markers.key` **不是**外键 | 草图常在导入之前上传；指向尚未导入的 Key 是事实，不是损坏 |
 
 ## 4. 租户隔离（RLS）
 

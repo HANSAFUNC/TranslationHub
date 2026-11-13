@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { McpScope } from './roles';
 import { localeTagSchema, platformSchema } from './schemas';
+import { MAX_MARKERS_PER_MOCKUP, MAX_MOCKUP_BYTES, markerSchema } from './mockup';
 
 /**
  * Canonical registry of the Remote MCP's tools. Shared by the server, the API's discovery
@@ -45,6 +46,7 @@ export const REMOTE_MCP_TOOLS = [
   'get_pending_platform_changes',
   'mark_applied',
   'validate_release',
+  'upload_screen_mockup',
 ] as const;
 export type RemoteMcpTool = (typeof REMOTE_MCP_TOOLS)[number];
 
@@ -63,6 +65,11 @@ export const REMOTE_MCP_TOOL_SCOPES: Partial<Record<RemoteMcpTool, McpScope[]>> 
   review_translation_entries: [McpScope.TRANSLATION_REVIEW],
   update_translation_draft: [McpScope.TRANSLATION_WRITE],
   mark_applied: [McpScope.TRANSLATION_APPLY],
+  // Repository → platform, like `import_translations`: the caller is handing over what it read from
+  // the checkout, and the mockup is part of that reading. It is not a translation write (nothing a
+  // translator would type) and not an apply (nothing is written into anyone's repository), so the
+  // scope that already means "put local content on the platform" is the right one.
+  upload_screen_mockup: [McpScope.SYNC_PUSH],
 };
 
 export const remoteToolSchemas = {
@@ -249,5 +256,59 @@ export const remoteToolSchemas = {
     project_id: z.string(),
     locales: z.array(localeTagSchema).optional(),
     fail_on: z.enum(['ERROR', 'WARNING']).default('ERROR'),
+  }),
+  /**
+   * The half of context a key cannot carry.
+   *
+   * A key says what a string is; it cannot say where it appears, so a reviewer looking at
+   * `checkout.pay_now` has to imagine the button. This tool uploads that missing half — a sketch of
+   * the screen plus one marker per key marking where its text sits — and the translation editor shows
+   * the two side by side, clicking either highlighting the other.
+   *
+   * Uploaded by the caller rather than fetched by the platform for the same reason as
+   * `import_translations`: the platform cannot see the caller's disk.
+   */
+  upload_screen_mockup: z.object({
+    project_id: z.string().describe('项目 id（list_projects 可取）'),
+    name: z
+      .string()
+      .min(1)
+      .max(120)
+      .describe('这个界面的名字，如 "checkout" 或 "登录页"。它是屏幕的身份：同一个名字再传一次会整体替换（图片与标记），不会堆积 checkout-2、checkout-final。'),
+    platform: platformSchema
+      .default('web')
+      .describe(
+        '这张草图对应的端，默认 web。标记按 key + namespace 匹配，不按端；当项目的同名 key 存在于多个端时，优先取这个端的那一条，' +
+          '取到别的端会在编辑器里标出来（「Key 在 web，不在 ios」）。',
+      ),
+    locale: localeTagSchema.describe(
+      '草图里文字用的语言，通常就是项目源语言。它只描述这张图，不参与 key 的身份。',
+    ),
+    image_base64: z
+      .string()
+      .min(1)
+      .describe(
+        `草图本身，base64（可以带 data: 前缀）。支持 SVG / PNG / JPEG，解码后不超过 ${Math.round(MAX_MOCKUP_BYTES / 1024 / 1024)} MB（传输层上限 4 MB，base64 会放大约 1/3）。` +
+          'SVG 最省事也最清晰，适合自己画一张线框图；不要在里面放 <script>、事件属性或 <foreignObject>，会被拒绝。',
+      ),
+    mime_type: z
+      .enum(['image/svg+xml', 'image/png', 'image/jpeg'])
+      .optional()
+      .describe('图片格式。可以不传：平台按字节判断真实格式，传错也不会写错 content-type。WebP 不支持——平台读不出它的像素尺寸，就不敢替浏览器收下它。'),
+    width: z.number().int().positive().max(8192).optional().describe('图片像素宽（可选，记下来给编辑器预留位置用）'),
+    height: z.number().int().positive().max(8192).optional().describe('图片像素高（可选）'),
+    markers: z
+      .array(markerSchema)
+      .min(1)
+      .max(MAX_MARKERS_PER_MOCKUP)
+      .describe(
+        '每个标记指向界面上一个 key 的位置。坐标是**相对图片的比例 0~1**，不是像素：x 是左边缘占宽的比例，y 是上边缘占高的比例,' +
+          'width/height 可选（省略就画一个点）。比例坐标的好处是同一张图在任何尺寸下都对齐，设计师换 2x 导出也不用重标。' +
+          'markers[].text 填图里显示的文字，编辑器可以据此提示「草图与平台原文不一致」。',
+      ),
+    replace: z
+      .boolean()
+      .default(true)
+      .describe('同名屏幕已存在时是否替换，默认 true。传 false 则报冲突而不是覆盖。'),
   }),
 } satisfies Record<RemoteMcpTool, z.ZodTypeAny>;

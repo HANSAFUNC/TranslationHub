@@ -162,7 +162,7 @@ function McpOnboarding({ snippets, remoteUrl }: { snippets?: McpClientSnippets; 
       <Step
         n={2}
         title="记下你的 project_id"
-        description="十八个工具里有十六个把它当第一个参数。它同时是你项目页地址的最后一段。"
+        description="十九个工具里有十七个把它当第一个参数。它同时是你项目页地址的最后一段。"
       >
         {projects?.length ? (
           <div className="flex flex-col gap-2">
