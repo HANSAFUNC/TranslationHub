@@ -6,7 +6,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { json, type NextFunction, type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
-import { ErrorCode } from '@localehub/contracts';
+import { ErrorCode, MAX_MOCKUP_BYTES, MAX_MOCKUP_REQUEST_BYTES } from '@localehub/contracts';
 import { contextRequestId } from './common/request-context';
 import { corsOrigins, loadEnv } from '@localehub/config';
 import { AppModule } from './app.module';
@@ -18,7 +18,7 @@ import { AppModule } from './app.module';
  * marker list — 4 MB is the same figure the MCP transport enforces, so the two surfaces agree about
  * what "too big" means.
  */
-const MOCKUP_BODY_LIMIT = '4mb';
+const MOCKUP_BODY_LIMIT = `${Math.max(1, Math.round(MAX_MOCKUP_REQUEST_BYTES / 1024 / 1024))}mb`;
 
 /**
  * The parser itself, kept behind a name Nest does not recognise as its own JSON parser.
@@ -86,11 +86,23 @@ async function bootstrap(): Promise<void> {
       // with what the logs would show for the same request.
       const requestId = contextRequestId() ?? (request.headers['x-request-id'] as string | undefined) ?? randomUUID();
       response.setHeader('x-request-id', requestId);
+      // "request entity too large" is body-parser's sentence, and it names neither the limit nor what
+      // to do about it. Both limits a caller can hit are documented, so the refusal says which one and
+      // where the budget went — an agent regenerating a sketch can act on that and cannot act on
+      // "too large".
+      const tooLarge = status === 413;
       response.status(status).json({
         success: false,
         error: {
           code: ErrorCode.VALIDATION_ERROR,
-          message: error.message ?? 'Invalid request body',
+          message: tooLarge
+            ? `请求体超过 ${Math.round(MAX_MOCKUP_REQUEST_BYTES / 1024 / 1024)} MB 上限。图片本身最多 ` +
+              `${Math.round(MAX_MOCKUP_BYTES / 1024 / 1024)} MB（base64 后约 1.37 倍），标记的 text/note 与图片共用这 ` +
+              `${Math.round(MAX_MOCKUP_REQUEST_BYTES / 1024 / 1024)} MB：图片或标记描述太大时都会到这里。`
+            : (error.message ?? 'Invalid request body'),
+          details: tooLarge
+            ? { limitBytes: MAX_MOCKUP_REQUEST_BYTES, imageLimitBytes: MAX_MOCKUP_BYTES }
+            : undefined,
           requestId,
         },
       });

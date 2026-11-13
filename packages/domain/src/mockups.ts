@@ -261,19 +261,49 @@ export async function upsertScreenMockup(
   //     apart, and it does so atomically: the loser gets `P2002`, which the exception filter maps to
   //     409. A read-then-write let both pass the check and the second silently overwrote the first
   //     while reporting `replaced: false`.
-  //   - `replace: true` is an `upsert`. Two same-name uploads in flight (an agent retrying while the
-  //     first is still committing) both read `existing = null`; the loser used to hit the index and
-  //     come back as CONFLICT, refusing a perfectly legal replacement.
+  //   - `replace: true` is one raw `INSERT … ON CONFLICT DO UPDATE`. Prisma's own `upsert` is not
+  //     enough here: with a nested relation in the `update` branch (`markers: { deleteMany: {} }`) it
+  //     compiles to a SELECT followed by INSERT/UPDATE rather than a single conflict-handling
+  //     statement, which reopens the very race it was chosen to close. The markers are cleared by
+  //     their own delete instead of nesting, and the statement below is atomic by construction.
+  //
+  //     Column order follows `data`; the bytea is passed as-is and the enums cast from text.
   const mockupId = input.replace
     ? (
-        await tx.screenMockup.upsert({
-          where: { projectId_platform_name: { projectId: input.projectId, platform: input.platform as never, name: input.name } },
-          create: data,
-          update: { ...data, markers: { deleteMany: {} } },
-          select: { id: true },
-        })
-      ).id
+        await tx.$queryRaw<{ id: string }[]>`
+          INSERT INTO screen_mockups (
+            id, organization_id, project_id, name, platform, locale,
+            width, height, mime_type, byte_size, content_hash, image, created_by_id,
+            created_at, updated_at
+          )
+          VALUES (
+            gen_random_uuid(), ${data.organizationId}::uuid, ${data.projectId}::uuid, ${data.name},
+            ${data.platform}::text::"PlatformKind", ${data.locale},
+            ${data.width}, ${data.height}, ${data.mimeType}, ${data.byteSize},
+            ${data.contentHash}, ${data.image}, ${data.createdById}::uuid,
+            now(), now()
+          )
+          ON CONFLICT (project_id, platform, name) DO UPDATE SET
+            organization_id = EXCLUDED.organization_id,
+            locale = EXCLUDED.locale,
+            width = EXCLUDED.width,
+            height = EXCLUDED.height,
+            mime_type = EXCLUDED.mime_type,
+            byte_size = EXCLUDED.byte_size,
+            content_hash = EXCLUDED.content_hash,
+            image = EXCLUDED.image,
+            created_by_id = EXCLUDED.created_by_id,
+            updated_at = now()
+          RETURNING id
+        `
+      )[0]!.id
     : (await tx.screenMockup.create({ data, select: { id: true } })).id;
+
+  // Markers of a replaced screen go before the new ones arrive, outside the upsert for the reason
+  // above. A freshly inserted row has none, so this is a no-op on the create path.
+  if (input.replace) {
+    await tx.screenMockupMarker.deleteMany({ where: { mockupId } });
+  }
 
   // Resolve which markers name a key the project actually has, by (namespace, key) rather than by the
   // full identity.

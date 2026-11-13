@@ -1106,6 +1106,22 @@ true）；390×844 窄屏下弹窗 367×776、`scrollWidth == clientWidth`（无
 迁移里手写了 RLS 策略（库里两条 `tenant_isolation` 已生效），但生成器不认识这两张表，重新生成时
 会把它们漏掉。
 
+**第三轮评审的四个候选也都修了**（都是读代码确认、两个有实测）：
+
+- **`replace: true` 的 upsert 其实不是原子的**。Prisma 的 `upsert` 一旦 `update` 分支里带嵌套关系
+  （`markers: { deleteMany: {} }`）就会退化成「先 SELECT 再 INSERT/UPDATE」，正好重新打开了它本来
+  要关的竞态。改成一条原生 `INSERT … ON CONFLICT (project_id, platform, name) DO UPDATE`，标记的
+  清空改为独立语句。实测：同名连续两次 `replace: true` 保持同一个 id、标记数正确跟随；**四个并发**
+  的 `replace: true` 全部 201，库里仍只有一行、一套标记。
+- **根标签扫描会被属性值里的 `>` 截断**。`<svg data-note="a > b" width="20000">` 用 `[^>]*` 只能
+  读到 `data-note`，尺寸读不到 → `assertMockupDimensions` 跳过，8192 的上限被绕过。改成按引号状态
+  逐字符扫描，并加了「带 `>` 的属性值下尺寸仍被读到」的回归测试。
+- **两个 SVG 读取器用的切片长度不同**（4096 / 8192）：序言较长的合法草图，识别层认作图片、测量层
+  却读不到尺寸。统一成一个常量。
+- **两个上限互相矛盾**：2 MB 图片 base64 后约 2.7 MB，再加 400 个标记的 `text` 可以超过 4 MB 的请求
+  上限，而 413 既不说是哪个上限也不说怎么改。现在有一个共享的 `MAX_MOCKUP_REQUEST_BYTES`，413 的
+  文案直接说明「图片最多 2 MB、与标记描述共用 4 MB」，并在 `details` 里给出两个数值。
+
 顺带修掉的一个「不是缺陷但会挡住它」的问题：API 的 JSON 请求体默认上限是 Express 的 100 kB，而一张
 草图经 base64 之后轻易超过它——`POST /projects/:id/mockups` 会以 413 拒掉一张正常的线框图。已在
 `main.ts` 提到 4 MB，与 MCP 传输层的上限一致，并加了一条 180 kB 载荷的回归测试。

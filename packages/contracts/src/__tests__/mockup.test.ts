@@ -129,6 +129,22 @@ describe('dimensions', () => {
     expect(svgDimensions('<svg stroke-width="2" viewBox="0 0 375 667"></svg>')).toEqual({ width: 375, height: 667 });
   });
 
+  it('reads the root tag past a ">" inside a quoted attribute, so the size cap still applies', () => {
+    // `[^>]*` stops at the first `>`, even inside a quoted value, which is legal SVG. The attributes
+    // after it disappear — including the size — and with no size the 8192 cap is skipped entirely.
+    const sketch = '<svg data-note="a > b" width="20000" height="20000"><rect width="1" height="1"/></svg>';
+    expect(svgDimensions(sketch)).toEqual({ width: 20000, height: 20000 });
+  });
+
+  it('is recognised as an SVG even when its root element follows a long prologue', () => {
+    // The detector and the measurer used to read different slice lengths (4 KB vs 8 KB), so a file
+    // with a comment in between was an image to one and unmeasurable to the other.
+    const prologue = '<!-- ' + 'x'.repeat(5000) + ' -->';
+    const bytes = new TextEncoder().encode(`${prologue}<svg width="32" height="16"/>`);
+    expect(detectImageType(bytes)).toBe('image/svg+xml');
+    expect(imageDimensions(bytes, 'image/svg+xml')).toEqual({ width: 32, height: 16 });
+  });
+
   it('is not fooled by a child element that has a size of its own', () => {
     // A sketch drawn as `<svg><rect width="300" height="150"/>…` has no intrinsic size of its own; the
     // first child's box is not it, and reporting one made the editor reserve the wrong space.

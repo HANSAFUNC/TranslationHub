@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { McpScope } from './roles';
 import { localeTagSchema, platformSchema } from './schemas';
-import { MAX_MARKERS_PER_MOCKUP, MAX_MOCKUP_BYTES, markerSchema } from './mockup';
+import { MAX_MARKERS_PER_MOCKUP, MAX_MOCKUP_BYTES, MAX_MOCKUP_REQUEST_BYTES, markerSchema } from './mockup';
 
 /**
  * Canonical registry of the Remote MCP's tools. Shared by the server, the API's discovery
@@ -288,7 +288,8 @@ export const remoteToolSchemas = {
       .string()
       .min(1)
       .describe(
-        `草图本身，base64（可以带 data: 前缀）。支持 SVG / PNG / JPEG，解码后不超过 ${Math.round(MAX_MOCKUP_BYTES / 1024 / 1024)} MB（传输层上限 4 MB，base64 会放大约 1/3）。` +
+        `草图本身，base64（可以带 data: 前缀）。支持 SVG / PNG / JPEG，解码后不超过 ${Math.round(MAX_MOCKUP_BYTES / 1024 / 1024)} MB。` +
+          `整个请求（图片 + 标记的 text/note）共用 ${Math.round(MAX_MOCKUP_REQUEST_BYTES / 1024 / 1024)} MB 的传输上限，base64 会让图片占约 1.37 倍——超了整单会被拒。` +
           'SVG 最省事也最清晰，适合自己画一张线框图；不要在里面放 <script>、事件属性或 <foreignObject>，会被拒绝。',
       ),
     mime_type: z

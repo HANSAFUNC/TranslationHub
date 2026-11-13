@@ -40,8 +40,24 @@ export type MockupImageType = keyof typeof MOCKUP_IMAGE_TYPES;
  */
 export const MAX_MOCKUP_BYTES = 2 * 1024 * 1024;
 
-/** Markers per screen. A screen with more than this is not a screen, it is an export. */
+/**
+ * Markers per screen. A screen with more than this is not a screen, it is an export.
+ *
+ * Sized against the request body, not picked for roundness: the transport refuses bodies over 4 MB
+ * and a 2 MB image costs ~2.7 MB once base64-encoded, so the marker list has ~1.3 MB to live in.
+ * 400 markers of ordinary size fit with room to spare; 400 markers each carrying a 2 000-character
+ * `text` would not, which is why the body limit is described to callers as a shared budget.
+ */
 export const MAX_MARKERS_PER_MOCKUP = 400;
+
+/**
+ * The whole-request ceiling for an upload, in bytes.
+ *
+ * Not a second, independent limit: it is the transport's 4 MB, restated here so the tool description
+ * and the API's error can both point at the same number instead of leaving a caller to guess why a
+ * legal-looking upload was refused.
+ */
+export const MAX_MOCKUP_REQUEST_BYTES = 4 * 1024 * 1024;
 
 /**
  * Maximum image dimensions.
@@ -50,6 +66,16 @@ export const MAX_MARKERS_PER_MOCKUP = 400;
  * browser has to decode and paint it at that size. Rejecting by name beats letting a tab die.
  */
 export const MAX_MOCKUP_DIMENSION = 8192;
+
+/**
+ * How much of an SVG's text the readers look at.
+ *
+ * One constant because the two readers have to agree: `detectImageType` decides whether the file is
+ * an SVG at all, and `svgDimensions` reads its size. They used different slices, so a sketch whose
+ * root element follows a prologue longer than the smaller slice was recognised as an image by one and
+ * left unmeasured by the other.
+ */
+const SVG_HEAD_BYTES = 8192;
 
 /**
  * Marker coordinates are fractions of the image, not pixels.
@@ -130,7 +156,7 @@ export function detectImageType(bytes: Uint8Array): MockupImageType | null {
   //
   // Escaped on purpose: a literal BOM is invisible to reviewers, and a BOM is exactly what an
   // XML-ish sketch tends to start with.
-  const head = new TextDecoder().decode(bytes.subarray(0, 4096)).replace(/^\uFEFF/, '').trimStart();
+  const head = new TextDecoder().decode(bytes.subarray(0, SVG_HEAD_BYTES)).replace(/^\uFEFF/, '').trimStart();
   // `[\s/>]`: a sketch with no content at all is written `<svg/>`, and the `/` before `>` is not
   // whitespace.
   const root = /<svg[\s/>]/i.exec(head);
@@ -177,6 +203,32 @@ export function unsafeSvgReasons(svg: string): string[] {
 }
 
 /**
+ * The attribute text of the root `<svg …>` element, or null when there is no root element.
+ *
+ * Scanned character by character rather than matched with `/<svg[^>]*>/`: a `>` inside a quoted
+ * attribute value (`<svg data-note="a > b" width="375">`) is legal, and stopping there would hide
+ * every attribute after it — including the size, which is what the caller's cap is enforced against.
+ */
+function rootSvgAttributes(svg: string): string | null {
+  const start = /<svg\b/i.exec(svg);
+  if (!start) return null;
+  let quote: string | null = null;
+  for (let index = start.index + start[0].length; index < svg.length; index += 1) {
+    const char = svg[index]!;
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '>') return svg.slice(start.index + start[0].length, index);
+  }
+  return null;
+}
+
+/**
  * Read an SVG's intrinsic size from its `width`/`height` attributes or its `viewBox`.
  *
  * Recorded as metadata so the editor can reserve the right space before the image decodes. A sketch
@@ -184,13 +236,11 @@ export function unsafeSvgReasons(svg: string): string[] {
  * this returns null rather than failing.
  */
 export function svgDimensions(svg: string): { width: number; height: number } | null {
-  const head = svg.slice(0, 4000);
-  // Only the root `svg` element's own attributes count. Scanning the whole slice finds `width=` on
-  // any child — a `<rect width="300">`, or worse, `stroke-width="2"` on the root, whose `\b` boundary
-  // matches after the hyphen and made a 375×667 sketch measure 2×667.
-  const root = /<svg\b([^>]*)>/i.exec(head);
-  if (!root) return null;
-  const attributes = root[1]!;
+  // Only the root `svg` element's own attributes count. Scanning further finds `width=` on any child
+  // — a `<rect width="300">`, or worse, `stroke-width="2"` on the root, whose `\b` boundary matches
+  // after the hyphen and made a 375×667 sketch measure 2×667.
+  const attributes = rootSvgAttributes(svg);
+  if (attributes === null) return null;
   const viewBox = /viewBox\s*=\s*["']\s*([-\d.]+)[\s,]+([-\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)\s*["']/i.exec(attributes);
   if (viewBox) {
     const width = Number(viewBox[3]);
@@ -268,7 +318,7 @@ export function jpegDimensions(bytes: Uint8Array): { width: number; height: numb
 export function imageDimensions(bytes: Uint8Array, type: MockupImageType): { width: number; height: number } | null {
   if (type === 'image/png') return pngDimensions(bytes);
   if (type === 'image/jpeg') return jpegDimensions(bytes);
-  return svgDimensions(new TextDecoder().decode(bytes.subarray(0, 8192)));
+  return svgDimensions(new TextDecoder().decode(bytes.subarray(0, SVG_HEAD_BYTES)));
 }
 
 /**
