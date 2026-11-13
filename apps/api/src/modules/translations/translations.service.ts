@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@localehub/database';
 import {
   ErrorCode,
   LocaleHubError,
@@ -29,34 +30,46 @@ export class TranslationsService {
   async list(actor: ActorContext, projectId: string, filters: ListEntriesFilters) {
     assertRole(actor, projectId, Role.READONLY);
     const limit = Math.min(filters.limit ?? 50, 200);
+    const where: Prisma.TranslationEntryWhereInput = {
+      projectId,
+      ...(filters.locale ? { localeCode: filters.locale } : {}),
+      ...(filters.status && filters.status !== 'ALL' && filters.status !== 'UNTRANSLATED'
+        ? { status: filters.status as never }
+        : {}),
+      key: {
+        archivedAt: null,
+        ...(filters.platform ? { platform: filters.platform as never } : {}),
+        ...(filters.namespace ? { namespace: { name: filters.namespace } } : {}),
+        ...(filters.search ? { key: { contains: filters.search, mode: 'insensitive' as const } } : {}),
+        ...(filters.keyPrefix ? { key: { startsWith: filters.keyPrefix } } : {}),
+      },
+    };
     return this.prisma.tenant.withOrganization(actor.organizationId, async (tx) => {
-      const rows = await tx.translationEntry.findMany({
-        where: {
-          projectId,
-          ...(filters.locale ? { localeCode: filters.locale } : {}),
-          ...(filters.status && filters.status !== 'ALL' && filters.status !== 'UNTRANSLATED' ? { status: filters.status as never } : {}),
-          key: {
-            archivedAt: null,
-            ...(filters.platform ? { platform: filters.platform as never } : {}),
-            ...(filters.namespace ? { namespace: { name: filters.namespace } } : {}),
-            ...(filters.search ? { key: { contains: filters.search, mode: 'insensitive' as const } } : {}),
-            ...(filters.keyPrefix ? { key: { startsWith: filters.keyPrefix } } : {}),
+      const [rows, total] = await Promise.all([
+        tx.translationEntry.findMany({
+          where,
+          include: {
+            key: { include: { namespace: true, sourceVersions: { orderBy: { version: 'desc' }, take: 1 } } },
+            versions: { orderBy: { version: 'desc' }, take: 1 },
           },
-        },
-        include: {
-          key: { include: { namespace: true, sourceVersions: { orderBy: { version: 'desc' }, take: 1 } } },
-          versions: { orderBy: { version: 'desc' }, take: 1 },
-        },
-        orderBy: [{ localeCode: 'asc' }, { keyId: 'asc' }],
-        take: limit + 1,
-        ...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
-      });
+          // By key name, then by id to make the order total. Sorting on `keyId` alone was stable
+          // but meaningless — it is a UUID, so a page of the editor arrived in random order and
+          // paging through it was paging through noise.
+          orderBy: [{ localeCode: 'asc' }, { key: { key: 'asc' } }, { id: 'asc' }],
+          take: limit + 1,
+          ...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
+        }),
+        // The page count is not derivable from a cursor response, and an editor that shows
+        // "100 条" when the project holds 8,300 gives the reader no idea where they are.
+        tx.translationEntry.count({ where }),
+      ]);
 
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
       return {
         items: page.map((entry) => this.toListItem(entry)),
         nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
+        total,
       };
     });
   }

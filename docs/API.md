@@ -108,7 +108,7 @@ public 路由不受影响，负载均衡仍可探测。
 
 | Method | Path                                                                                            | 最低角色   | 说明                                               |
 | ------ | ----------------------------------------------------------------------------------------------- | ---------- | -------------------------------------------------- |
-| GET    | `/projects/:projectId/translations?locale=&status=&platform=&namespace=&search=&cursor=&limit=` | READONLY   | cursor 分页                                        |
+| GET    | `/projects/:projectId/translations?locale=&status=&platform=&namespace=&search=&cursor=&limit=` | READONLY   | cursor 分页，响应含 `total`                                        |
 | GET    | `/projects/:projectId/translations/:entryId`                                                    | READONLY   | 含源文版本、译文版本、QA 问题                      |
 | GET    | `/projects/:projectId/translations/:entryId/versions`                                           | READONLY   | 版本历史                                           |
 | GET    | `/projects/:projectId/translations/stale`                                                       | READONLY   | 过期译文                                           |

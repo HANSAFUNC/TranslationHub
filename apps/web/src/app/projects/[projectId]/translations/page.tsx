@@ -1,8 +1,8 @@
 'use client';
 
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
-import { CheckCheck, GitBranch, Languages, Search, Send, Undo2, Wand2 } from 'lucide-react';
+import { CheckCheck, ChevronLeft, ChevronRight, GitBranch, Languages, Search, Send, Undo2, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
@@ -28,38 +28,67 @@ import { localeDisplayName } from '@localehub/contracts/locale';
 import { cn } from '@/lib/utils';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'PENDING_REVIEW', 'APPROVED', 'STALE', 'REJECTED'] as const;
+const PAGE_SIZES = [50, 100, 200] as const;
 
 interface ProjectLocales {
   locales: { code: string; name: string }[];
   sourceLocale: string;
 }
 
+interface EntryPage {
+  items: TranslationListItem[];
+  nextCursor: string | null;
+  total: number;
+}
+
 /**
  * Translation editor: source and target side by side, context, version history, QA findings,
  * draft saving and review actions. Approving here is what produces the remote revision the
  * CLI pulls (spec §11.4).
+ *
+ * Both panes scroll on their own and the list pages by cursor. The list used to render the first
+ * hundred entries and stop — `nextCursor` was fetched and dropped — so on a project with eight
+ * thousand entries the editor showed one page and gave no way to reach the rest, and the only
+ * indication of size was the length of that page.
  */
 export default function TranslationsPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
   const router = useRouter();
 
-  const [locale, setLocale] = useState('ALL');
-  const [status, setStatus] = useState<(typeof STATUS_FILTERS)[number]>('ALL');
-  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState({ locale: 'ALL', status: 'ALL' as (typeof STATUS_FILTERS)[number], search: '' });
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [pageSize, setPageSize] = useState<number>(100);
+  // A stack of cursors, one entry per page visited. `nextCursor` only points forward, so "previous"
+  // is the cursor the reader came from — kept here rather than re-derived, because the API has no
+  // offset to compute it from.
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<unknown>(null);
+  const selectedRow = useRef<HTMLTableRowElement | null>(null);
+
+  const pageIndex = cursors.length - 1;
+  const cursor = cursors[pageIndex] ?? null;
+
+  // Typing a key name used to fire a request per keystroke; with a count alongside every page that
+  // is two queries per character.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(filters.search), 300);
+    return () => clearTimeout(timer);
+  }, [filters.search]);
 
   const query = useMemo(() => {
     const map = new URLSearchParams();
-    if (locale !== 'ALL') map.set('locale', locale);
-    if (status !== 'ALL') map.set('status', status);
-    if (search) map.set('search', search);
-    map.set('limit', '100');
+    if (filters.locale !== 'ALL') map.set('locale', filters.locale);
+    if (filters.status !== 'ALL') map.set('status', filters.status);
+    if (debouncedSearch) map.set('search', debouncedSearch);
+    if (cursor) map.set('cursor', cursor);
+    map.set('limit', String(pageSize));
     return map.toString();
-  }, [locale, status, search]);
+  }, [filters.locale, filters.status, debouncedSearch, cursor, pageSize]);
 
   const { data: project } = useAsync(() => get<ProjectLocales>(`/projects/${projectId}`), [projectId]);
   const {
@@ -67,14 +96,32 @@ export default function TranslationsPage() {
     error,
     loading,
     reload,
-  } = useAsync(
-    () => get<{ items: TranslationListItem[]; nextCursor: string | null }>(`/projects/${projectId}/translations?${query}`),
-    [projectId, query],
-  );
+  } = useAsync(() => get<EntryPage>(`/projects/${projectId}/translations?${query}`), [projectId, query]);
   const { data: detail, reload: reloadDetail } = useAsync(
     () => (selected ? get<TranslationDetail>(`/projects/${projectId}/translations/${selected}`) : Promise.resolve(null)),
     [projectId, selected],
   );
+
+  const items = list?.items ?? [];
+  const total = list?.total ?? 0;
+  const firstOnPage = pageIndex * pageSize + (items.length ? 1 : 0);
+  const lastOnPage = pageIndex * pageSize + items.length;
+  const hasNext = Boolean(list?.nextCursor);
+  const hasPrevious = pageIndex > 0;
+
+  /** Any filter change invalidates the cursor: it points into the previous result set. */
+  function updateFilters(patch: Partial<typeof filters>) {
+    setFilters((current) => ({ ...current, ...patch }));
+    setCursors([null]);
+  }
+
+  const goNext = useCallback(() => {
+    if (list?.nextCursor) setCursors((current) => [...current, list.nextCursor]);
+  }, [list?.nextCursor]);
+
+  function goPrevious() {
+    setCursors((current) => (current.length > 1 ? current.slice(0, -1) : current));
+  }
 
   async function run(key: string, action: () => Promise<unknown>, message: string) {
     setBusy(key);
@@ -96,6 +143,36 @@ export default function TranslationsPage() {
     setActionError(null);
   }
 
+  // Keep the chosen row visible when it was reached by keyboard rather than by click.
+  useEffect(() => {
+    selectedRow.current?.scrollIntoView({ block: 'nearest' });
+  }, [selected, items]);
+
+  // ↑/↓ walk the list, and ↓ past the last row turns the page. Skipped while a field has focus, so
+  // arrowing inside the translation box moves the caret as usual.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (!items.length || event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+
+      const index = items.findIndex((item) => item.entryId === selected);
+      if (event.key === 'ArrowUp') {
+        select(items[Math.max(index - 1, 0)] ?? items[0]!);
+        return;
+      }
+      if (index === items.length - 1) {
+        goNext();
+        return;
+      }
+      select(items[index + 1] ?? items[0]!);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [items, selected, goNext]);
+
   return (
     <>
       <PageHeader
@@ -112,7 +189,7 @@ export default function TranslationsPage() {
       <FieldGroup className="mb-4 grid gap-3 sm:grid-cols-3">
         <Field>
           <FieldLabel>语言</FieldLabel>
-          <Select value={locale} onValueChange={setLocale}>
+          <Select value={filters.locale} onValueChange={(value) => updateFilters({ locale: value })}>
             <SelectTrigger className="w-full">
               <SelectValue placeholder="全部语言" />
             </SelectTrigger>
@@ -132,7 +209,7 @@ export default function TranslationsPage() {
         </Field>
         <Field>
           <FieldLabel>状态</FieldLabel>
-          <Select value={status} onValueChange={(value) => setStatus(value as typeof status)}>
+          <Select value={filters.status} onValueChange={(value) => updateFilters({ status: value as typeof filters.status })}>
             <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
@@ -155,8 +232,8 @@ export default function TranslationsPage() {
               id="search"
               className="pl-8"
               placeholder="checkout.pay_now"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              value={filters.search}
+              onChange={(event) => updateFilters({ search: event.target.value })}
             />
           </div>
         </Field>
@@ -164,21 +241,27 @@ export default function TranslationsPage() {
 
       <ErrorAlert error={error} />
 
-      <div className={cn('grid gap-4', selected ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]' : '')}>
-        <Card className="overflow-hidden">
-          <CardHeader>
+      {/* At xl the panes fill the viewport and scroll independently — including when only the list
+          is open, where `h-full` on the scroll area would otherwise resolve against an auto height
+          and the whole page would scroll instead. Below xl the page scrolls as a whole, because two
+          nested scroll areas on a phone is worse than one. */}
+      <div className="flex flex-col gap-4 xl:h-[calc(100svh-17rem)] xl:min-h-96 xl:flex-row">
+        <Card className={cn('flex min-h-0 flex-col overflow-hidden', detail ? 'xl:w-[46%] xl:shrink-0' : '')}>
+          <CardHeader className="shrink-0">
             <CardTitle className="text-base">条目</CardTitle>
-            <CardDescription>{list ? `${list.items.length} 条` : '加载中…'}</CardDescription>
+            <CardDescription>
+              {list ? (total ? `第 ${firstOnPage}–${lastOnPage} 条，共 ${total} 条` : '没有匹配的条目') : '加载中…'}
+            </CardDescription>
           </CardHeader>
-          <CardContent className="px-0">
+          <CardContent className="min-h-0 flex-1 px-0">
             {loading ? (
               <div className="flex flex-col gap-2 px-6">
                 {Array.from({ length: 5 }).map((_, index) => (
                   <Skeleton key={index} className="h-10" />
                 ))}
               </div>
-            ) : list?.items.length ? (
-              <ScrollArea className="max-h-[60vh]">
+            ) : items.length ? (
+              <ScrollArea className="h-[60vh] xl:h-full">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -190,9 +273,10 @@ export default function TranslationsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {list.items.map((entry) => (
+                    {items.map((entry) => (
                       <TableRow
                         key={entry.entryId}
+                        ref={selected === entry.entryId ? selectedRow : undefined}
                         onClick={() => select(entry)}
                         className={cn('cursor-pointer', selected === entry.entryId && 'bg-accent/60')}
                       >
@@ -228,11 +312,38 @@ export default function TranslationsPage() {
               </div>
             )}
           </CardContent>
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-6 py-3">
+            <div className="text-muted-foreground text-xs">↑/↓ 切换条目，到底部自动翻页</div>
+            <div className="flex items-center gap-2">
+              <Select value={String(pageSize)} onValueChange={(value) => { setPageSize(Number(value)); setCursors([null]); }}>
+                <SelectTrigger size="sm" className="w-[104px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {PAGE_SIZES.map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        每页 {size} 条
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" onClick={goPrevious} disabled={!hasPrevious || loading}>
+                <ChevronLeft data-icon="inline-start" />
+                上一页
+              </Button>
+              <Button variant="outline" size="sm" onClick={goNext} disabled={!hasNext || loading}>
+                下一页
+                <ChevronRight />
+              </Button>
+            </div>
+          </div>
         </Card>
 
         {detail ? (
-          <Card>
-            <CardHeader>
+          <Card className="flex min-h-0 flex-1 flex-col">
+            <CardHeader className="shrink-0">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
                   <CardTitle className="break-all font-mono text-base">{detail.key}</CardTitle>
@@ -243,169 +354,173 @@ export default function TranslationsPage() {
                 <StatusBadge status={detail.status} />
               </div>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <ErrorAlert error={actionError} onDismiss={() => setActionError(null)} />
+            <CardContent className="min-h-0 flex-1 overflow-hidden">
+              <ScrollArea className="h-full pr-3">
+                <div className="flex flex-col gap-4">
+                  <ErrorAlert error={actionError} onDismiss={() => setActionError(null)} />
 
-              <Tabs defaultValue="edit">
-                <TabsList>
-                  <TabsTrigger value="edit">编辑</TabsTrigger>
-                  <TabsTrigger value="history">版本历史</TabsTrigger>
-                  <TabsTrigger value="qa">QA {detail.qaIssues.length ? `(${detail.qaIssues.length})` : ''}</TabsTrigger>
-                </TabsList>
+                  <Tabs defaultValue="edit">
+                    <TabsList>
+                      <TabsTrigger value="edit">编辑</TabsTrigger>
+                      <TabsTrigger value="history">版本历史</TabsTrigger>
+                      <TabsTrigger value="qa">QA {detail.qaIssues.length ? `(${detail.qaIssues.length})` : ''}</TabsTrigger>
+                    </TabsList>
 
-                <TabsContent value="edit" className="flex flex-col gap-4">
-                  <FieldGroup className="grid gap-4 md:grid-cols-2">
-                    <Field>
-                      <FieldLabel>原文（{project?.sourceLocale}）</FieldLabel>
-                      <div className="bg-muted/50 min-h-24 whitespace-pre-wrap break-words rounded-md border p-3 font-mono text-sm">
-                        {detail.source ?? '—'}
+                    <TabsContent value="edit" className="flex flex-col gap-4">
+                      <FieldGroup className="grid gap-4 md:grid-cols-2">
+                        <Field>
+                          <FieldLabel>原文（{project?.sourceLocale}）</FieldLabel>
+                          <div className="bg-muted/50 max-h-64 min-h-24 overflow-auto whitespace-pre-wrap break-words rounded-md border p-3 font-mono text-sm">
+                            {detail.source ?? '—'}
+                          </div>
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor="draft">译文（{detail.locale}）</FieldLabel>
+                          <Textarea
+                            id="draft"
+                            className="max-h-64 min-h-24 font-mono"
+                            value={draft}
+                            onChange={(event) => setDraft(event.target.value)}
+                          />
+                        </Field>
+                      </FieldGroup>
+
+                      {detail.description ? (
+                        <Field>
+                          <FieldLabel>上下文 / 描述</FieldLabel>
+                          <div className="text-muted-foreground text-sm">{detail.description}</div>
+                        </Field>
+                      ) : null}
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          onClick={() =>
+                            run(
+                              'draft',
+                              () =>
+                                post(`/projects/${projectId}/translations/${detail.entryId}/draft`, {
+                                  value: draft,
+                                  expectedRevision: detail.revision,
+                                }),
+                              '草稿已保存（新版本已创建，历史版本保留）',
+                            )
+                          }
+                          disabled={busy !== null || draft === detail.value}
+                        >
+                          {busy === 'draft' ? <Spinner data-icon="inline-start" /> : <Wand2 />}
+                          保存草稿
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            run(
+                              'submit',
+                              () => post(`/projects/${projectId}/translations/submit`, { entryIds: [detail.entryId] }),
+                              '已提交审核',
+                            )
+                          }
+                          disabled={busy !== null || detail.status === 'PENDING_REVIEW'}
+                        >
+                          {busy === 'submit' ? <Spinner data-icon="inline-start" /> : <Send />}
+                          提交审核
+                        </Button>
+                        <Button
+                          onClick={() =>
+                            run(
+                              'approve',
+                              () =>
+                                post(`/projects/${projectId}/translations/review`, {
+                                  entryIds: [detail.entryId],
+                                  decision: 'APPROVE',
+                                }),
+                              '已审核通过：CLI 现在可以拉取该译文',
+                            )
+                          }
+                          disabled={busy !== null || detail.status === 'APPROVED'}
+                        >
+                          {busy === 'approve' ? <Spinner data-icon="inline-start" /> : <CheckCheck />}
+                          审核通过
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          onClick={() =>
+                            run(
+                              'reject',
+                              () =>
+                                post(`/projects/${projectId}/translations/review`, {
+                                  entryIds: [detail.entryId],
+                                  decision: 'REJECT',
+                                }),
+                              '已退回',
+                            )
+                          }
+                          disabled={busy !== null}
+                        >
+                          {busy === 'reject' ? <Spinner data-icon="inline-start" /> : <Undo2 />}
+                          退回
+                        </Button>
                       </div>
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="draft">译文（{detail.locale}）</FieldLabel>
-                      <Textarea
-                        id="draft"
-                        className="min-h-24 font-mono"
-                        value={draft}
-                        onChange={(event) => setDraft(event.target.value)}
-                      />
-                    </Field>
-                  </FieldGroup>
 
-                  {detail.description ? (
-                    <Field>
-                      <FieldLabel>上下文 / 描述</FieldLabel>
-                      <div className="text-muted-foreground text-sm">{detail.description}</div>
-                    </Field>
-                  ) : null}
+                      <p className="text-muted-foreground text-xs">
+                        审核通过是译文能够回写本地文件的唯一入口；AI 结果永远是草稿，不能绕过这一步。
+                      </p>
+                    </TabsContent>
 
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      onClick={() =>
-                        run(
-                          'draft',
-                          () =>
-                            post(`/projects/${projectId}/translations/${detail.entryId}/draft`, {
-                              value: draft,
-                              expectedRevision: detail.revision,
-                            }),
-                          '草稿已保存（新版本已创建，历史版本保留）',
-                        )
-                      }
-                      disabled={busy !== null || draft === detail.value}
-                    >
-                      {busy === 'draft' ? <Spinner data-icon="inline-start" /> : <Wand2 />}
-                      保存草稿
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        run(
-                          'submit',
-                          () => post(`/projects/${projectId}/translations/submit`, { entryIds: [detail.entryId] }),
-                          '已提交审核',
-                        )
-                      }
-                      disabled={busy !== null || detail.status === 'PENDING_REVIEW'}
-                    >
-                      {busy === 'submit' ? <Spinner data-icon="inline-start" /> : <Send />}
-                      提交审核
-                    </Button>
-                    <Button
-                      onClick={() =>
-                        run(
-                          'approve',
-                          () =>
-                            post(`/projects/${projectId}/translations/review`, {
-                              entryIds: [detail.entryId],
-                              decision: 'APPROVE',
-                            }),
-                          '已审核通过：CLI 现在可以拉取该译文',
-                        )
-                      }
-                      disabled={busy !== null || detail.status === 'APPROVED'}
-                    >
-                      {busy === 'approve' ? <Spinner data-icon="inline-start" /> : <CheckCheck />}
-                      审核通过
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() =>
-                        run(
-                          'reject',
-                          () =>
-                            post(`/projects/${projectId}/translations/review`, {
-                              entryIds: [detail.entryId],
-                              decision: 'REJECT',
-                            }),
-                          '已退回',
-                        )
-                      }
-                      disabled={busy !== null}
-                    >
-                      {busy === 'reject' ? <Spinner data-icon="inline-start" /> : <Undo2 />}
-                      退回
-                    </Button>
+                    <TabsContent value="history">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-12">#</TableHead>
+                            <TableHead>值</TableHead>
+                            <TableHead>状态</TableHead>
+                            <TableHead>来源</TableHead>
+                            <TableHead className="text-right">时间</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {detail.versions.map((version) => (
+                            <TableRow key={version.id}>
+                              <TableCell className="font-mono text-xs">{version.version}</TableCell>
+                              <TableCell className="max-w-72 whitespace-pre-wrap">{version.value}</TableCell>
+                              <TableCell>
+                                <StatusBadge status={version.status} />
+                              </TableCell>
+                              <TableCell className="text-muted-foreground text-xs">{version.authorType}</TableCell>
+                              <TableCell className="text-muted-foreground text-right text-xs">{timeAgo(version.createdAt)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                      <p className="text-muted-foreground mt-3 text-xs">版本不可变：修改只会追加新版本，历史永不覆盖。</p>
+                    </TabsContent>
+
+                    <TabsContent value="qa">
+                      {detail.qaIssues.length ? (
+                        <ul className="flex flex-col gap-2">
+                          {detail.qaIssues.map((issue) => (
+                            <li key={issue.id} className="flex items-start gap-2 text-sm">
+                              <StatusBadge status={issue.severity} />
+                              <span>
+                                <span className="text-muted-foreground font-mono text-xs">{issue.ruleCode}</span> {issue.message}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <EmptyState title="没有未解决的 QA 问题" description="可以在「质量中心」重新运行规则引擎。" />
+                      )}
+                    </TabsContent>
+                  </Tabs>
+
+                  <Separator />
+                  <div className="text-muted-foreground flex flex-wrap gap-4 text-xs">
+                    <span>
+                      content hash: <span className="font-mono">{detail.contentHash.slice(0, 16)}…</span>
+                    </span>
+                    <span>回写状态: {detail.appliedToRepoAt ? `已回写 ${timeAgo(detail.appliedToRepoAt)}` : '未回写'}</span>
                   </div>
-
-                  <p className="text-muted-foreground text-xs">
-                    审核通过是译文能够回写本地文件的唯一入口；AI 结果永远是草稿，不能绕过这一步。
-                  </p>
-                </TabsContent>
-
-                <TabsContent value="history">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12">#</TableHead>
-                        <TableHead>值</TableHead>
-                        <TableHead>状态</TableHead>
-                        <TableHead>来源</TableHead>
-                        <TableHead className="text-right">时间</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {detail.versions.map((version) => (
-                        <TableRow key={version.id}>
-                          <TableCell className="font-mono text-xs">{version.version}</TableCell>
-                          <TableCell className="max-w-72 whitespace-pre-wrap">{version.value}</TableCell>
-                          <TableCell>
-                            <StatusBadge status={version.status} />
-                          </TableCell>
-                          <TableCell className="text-muted-foreground text-xs">{version.authorType}</TableCell>
-                          <TableCell className="text-muted-foreground text-right text-xs">{timeAgo(version.createdAt)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  <p className="text-muted-foreground mt-3 text-xs">版本不可变：修改只会追加新版本，历史永不覆盖。</p>
-                </TabsContent>
-
-                <TabsContent value="qa">
-                  {detail.qaIssues.length ? (
-                    <ul className="flex flex-col gap-2">
-                      {detail.qaIssues.map((issue) => (
-                        <li key={issue.id} className="flex items-start gap-2 text-sm">
-                          <StatusBadge status={issue.severity} />
-                          <span>
-                            <span className="text-muted-foreground font-mono text-xs">{issue.ruleCode}</span> {issue.message}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <EmptyState title="没有未解决的 QA 问题" description="可以在「质量中心」重新运行规则引擎。" />
-                  )}
-                </TabsContent>
-              </Tabs>
-
-              <Separator />
-              <div className="text-muted-foreground flex flex-wrap gap-4 text-xs">
-                <span>
-                  content hash: <span className="font-mono">{detail.contentHash.slice(0, 16)}…</span>
-                </span>
-                <span>回写状态: {detail.appliedToRepoAt ? `已回写 ${timeAgo(detail.appliedToRepoAt)}` : '未回写'}</span>
-              </div>
+                </div>
+              </ScrollArea>
             </CardContent>
           </Card>
         ) : null}

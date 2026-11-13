@@ -237,6 +237,84 @@ describe('editing a project', () => {
     expect((onlyIos.body.data?.platforms ?? []).map((row) => row.platform)).toEqual(['ios']);
   });
 
+  /**
+   * The editor pages by cursor, so the list has to answer three things a cursor alone cannot:
+   * which order the pages are in, how many rows there are in total, and where the next page starts.
+   */
+  it('lists entries by key name, with a total and a working cursor', async () => {
+    const project = await createProject({ name: `Listing ${runId}`, sourceLocale: 'en-US', platforms: ['web'] });
+    // Deliberately unsorted, and with keys whose names do not follow their insertion order.
+    const keys = ['listing.c', 'listing.a', 'listing.e', 'listing.b', 'listing.d'];
+    const scan = await call<{ connectionId: string; scanId: string }>('/sync/scans', {
+      method: 'POST',
+      token,
+      body: {
+        projectId: project.id,
+        scanId: `scan-${runId}-listing`,
+        client: { name: 'settings-suite', version: '0' },
+        files: [
+          {
+            fileId: 'web-en-US',
+            filePath: 'locales/en-US/listing.json',
+            locale: 'en-US',
+            platform: 'web',
+            format: 'json',
+            fileHash: '0'.repeat(64),
+            entryCount: keys.length,
+          },
+        ],
+        entries: keys.map((key, index) => ({
+          key,
+          namespace: '',
+          locale: 'en-US',
+          value: `value ${index}`,
+          isSource: true,
+          contentHash: index.toString(16).padEnd(64, 'c').slice(0, 64),
+          fileId: 'web-en-US',
+          filePath: 'locales/en-US/listing.json',
+        })),
+      },
+    });
+    expect(scan.status, JSON.stringify(scan.body.error)).toBe(201);
+    const preview = await call<{ syncPlanId: string; planHash: string }>('/sync/preview', {
+      method: 'POST',
+      token,
+      body: {
+        projectId: project.id,
+        repositoryConnectionId: scan.body.data!.connectionId,
+        scanId: scan.body.data!.scanId,
+        direction: 'push',
+      },
+    });
+    await call('/sync/push', {
+      method: 'POST',
+      token,
+      body: {
+        syncPlanId: preview.body.data!.syncPlanId,
+        planHash: preview.body.data!.planHash,
+        confirmed: true,
+        client: { name: 'settings-suite', version: '0' },
+      },
+    });
+
+    const page = await call<{ items: { key: string }[]; nextCursor: string | null; total: number }>(
+      `/projects/${project.id}/translations?limit=2`,
+      { token },
+    );
+    expect(page.status, JSON.stringify(page.body.error)).toBe(200);
+    expect(page.body.data!.total).toBe(5);
+    // Sorted by key name, not by insertion and not by id.
+    expect(page.body.data!.items.map((item) => item.key)).toEqual(['listing.a', 'listing.b']);
+
+    const next = await call<{ items: { key: string }[]; total: number }>(
+      `/projects/${project.id}/translations?limit=2&cursor=${page.body.data!.nextCursor}`,
+      { token },
+    );
+    expect(next.body.data!.items.map((item) => item.key)).toEqual(['listing.c', 'listing.d']);
+    // The total is the size of the result set, not of the page.
+    expect(next.body.data!.total).toBe(5);
+  });
+
   it('refuses to drop a platform that still holds keys', async () => {
     const project = await createProject({ name: `Busy platform ${runId}`, sourceLocale: 'en-US', platforms: ['web'] });
     const scan = await call<{ connectionId: string; scanId: string }>('/sync/scans', {
